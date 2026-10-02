@@ -3580,6 +3580,8 @@ Expected: the stylesheet test FAILS (no `landingtimer-panel` in the bundle) and 
 .landingtimer-panel__summary { margin-top: 6px; font-weight: 600; }
 .landingtimer-panel__variance { color: #aaa; font-size: 11px; }
 .landingtimer-panel__variance--warn { color: #ffb74d; }
+.landingtimer-panel__error { color: #ff8a80; font-weight: 600; }
+.landingtimer-panel__error:empty { display: none; }
 .landingtimer-panel__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .landingtimer-panel__actions button {
   font: inherit;
