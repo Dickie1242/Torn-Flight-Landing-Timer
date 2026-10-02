@@ -2732,6 +2732,16 @@ git add src/widget/drag.js test/drag.test.js
 git commit -m "feat: drag the timer box by its title bar, kept on screen" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
+> **Amended after code review (Tasks 8 and 9).** The code above was built as written, then changed in a follow-up commit. The committed files are authoritative.
+> - **Button placement:** the button accepts any later sibling of the status box, so two copies settle instead of swapping places forever.
+> - **Button work and focus:** it checks the page at most once per animation frame, and keeps keyboard focus when it moves.
+> - **Drag width:** the drag measures the window without its scrollbar.
+> - **Drag pointer:** it captures the pointer, follows only the pointer that started the drag, and ends on a release, cancel, blur, lost capture or a move with no button held.
+> - **Drag threshold:** a move under 3 px is a click.
+> - **Default corner:** it keeps a tall box on screen.
+> - **Test helpers:** `testlib/dom.js` gained `nextFrame`, and `firePointer` gained the pointer fields.
+> - **Task 12:** adds a once-per-page guard in `main.js`, the stylesheet checks `attachDrag` relies on, and a `max-height` on the timer list.
+
 ---
 
 ### Task 10: The floating timer box
@@ -3437,6 +3447,9 @@ test('the bundle inlines the stylesheet, the selectors and the storage key', () 
   assert.match(code, /\.landingtimer-panel \{[^}]*z-index: 2147483647/, 'the panel stacks above everything');
   assert.match(code, /div\.profile-status/);
   assert.match(code, /landingtimer\.v1/);
+  // attachDrag relies on these two rules (see its JSDoc).
+  assert.match(code, /\.landingtimer-widget \{[^}]*user-select: none/, 'dragging must not select text');
+  assert.match(code, /\.landingtimer-widget__bar \{[^}]*touch-action: none/, 'a touch drag must not scroll the page');
 });
 
 /**
@@ -3501,6 +3514,18 @@ test('smoke: off a profile it shows only the hidden timer box', async () => {
   try {
     assert.ok(doc.querySelector('.landingtimer-widget'));
     assert.equal(doc.querySelector('.landingtimer-button'), null);
+    assert.deepEqual(problems, []);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('smoke: a second installed copy on the same page stays idle', async () => {
+  const { dom, doc, problems } = await boot('https://www.torn.com/index.php');
+  try {
+    dom.window.eval(bundle());
+    assert.equal(doc.querySelectorAll('.landingtimer-widget').length, 1);
+    assert.equal(doc.querySelectorAll('#landingtimer-styles').length, 1);
     assert.deepEqual(problems, []);
   } finally {
     dom.window.close();
@@ -3623,7 +3648,7 @@ Expected: the stylesheet test FAILS (no `landingtimer-panel` in the bundle) and 
 }
 .landingtimer-widget__title { font-weight: 600; }
 .landingtimer-widget__sound { font: inherit; padding: 0 2px; color: inherit; background: none; border: 0; cursor: pointer; }
-.landingtimer-widget__list { padding: 2px 0; }
+.landingtimer-widget__list { max-height: calc(100vh - 48px); overflow-y: auto; padding: 2px 0; }
 .landingtimer-row {
   display: grid;
   grid-template-columns: 1fr auto auto 18px;
@@ -3654,6 +3679,7 @@ Expected: the stylesheet test FAILS (no `landingtimer-panel` in the bundle) and 
 import * as selectors from './core/selectors.js';
 import { info, safe } from './core/log.js';
 import { injectStyles } from './core/styles.js';
+import { VERSION } from './core/version.js';
 import { createStorage } from './core/storage.js';
 import { createAlarm, defaultCanPlay } from './core/alarm.js';
 import { createWidget } from './widget/widget.js';
@@ -3664,7 +3690,17 @@ import { createPanel } from './profile/panel.js';
 /** States in which the profile button gets its accent. */
 const FLYING_STATES = new Set(['traveling', 'hidden']);
 
+/** Marks the page, so a second installed copy (a dev build beside the release, say) stays idle. */
+const RUNNING_ATTR = 'data-landingtimer-running';
+
 function boot() {
+  const root = document.documentElement;
+  if (root.hasAttribute(RUNNING_ATTR)) {
+    info('another copy is already running on this page; this one stays idle');
+    return;
+  }
+  root.setAttribute(RUNNING_ATTR, VERSION);
+
   injectStyles(document);
 
   const storage = createStorage();
