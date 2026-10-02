@@ -126,6 +126,7 @@
   padding: 3px 8px;
 }
 .landingtimer-row__name:not(#_) {
+  font: inherit;
   max-width: 120px;
   overflow: hidden;
   color: #8ab4f8;

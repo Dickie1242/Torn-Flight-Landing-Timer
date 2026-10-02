@@ -208,6 +208,7 @@
   padding: 3px 8px;
 }
 .landingtimer-row__name:not(#_) {
+  font: inherit;
   max-width: 120px;
   overflow: hidden;
   color: #8ab4f8;
@@ -751,7 +752,10 @@
       tick();
     });
     const onGesture = safe("alarm.gesture", () => {
-      if (waiting().length === 0) return;
+      if (waiting().length === 0) {
+        if (audio.isBlocked()) audio.unlock();
+        return;
+      }
       audio.unlock();
       clock.setTimeout(tick, 0);
     });

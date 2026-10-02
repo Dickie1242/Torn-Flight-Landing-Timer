@@ -343,3 +343,15 @@ test('with a timer waiting, the tab checks once whether it may play, so the hint
   await flush();
   assert.equal(t.audio.readies, 1, 'once per page');
 });
+
+test('a click clears a blocked tab even once nothing is waiting any more', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer());
+  const t = tab({ area, clock, locks: fakeLocks(), allowed: false });
+  await flush();
+  assert.equal(t.audio.isBlocked(), true, 'the check at load found the tab blocked');
+  t.storage.markRung('1234567', T0); // another tab rang it
+  t.win.dispatchEvent(new Event('pointerdown'));
+  assert.equal(t.audio.isBlocked(), false, 'so the hint goes, and a click on it cannot mute');
+});

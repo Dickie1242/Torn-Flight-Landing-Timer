@@ -206,7 +206,12 @@ export function createAlarm({
 
   // A real click or key press is when a browser lets a page start sound.
   const onGesture = safe('alarm.gesture', () => {
-    if (waiting().length === 0) return;
+    if (waiting().length === 0) {
+      // Nothing to ring, but a tab found blocked earlier must not keep its
+      // "click to allow" hint: the click is the permission, timer or not.
+      if (audio.isBlocked()) audio.unlock();
+      return;
+    }
     audio.unlock();
     clock.setTimeout(tick, 0);
   });
