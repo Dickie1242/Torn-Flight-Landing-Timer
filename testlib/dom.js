@@ -39,6 +39,16 @@ export function settle() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/**
+ * Waits until work a DOM change scheduled onto the next animation frame has
+ * run: MutationObserver callbacks run in a microtask, and jsdom runs frame
+ * callbacks in the order they were requested. Needs `pretendToBeVisual`.
+ */
+export async function nextFrame(doc) {
+  await Promise.resolve();
+  await new Promise((resolve) => doc.defaultView.requestAnimationFrame(() => resolve()));
+}
+
 /** jsdom has no layout engine, so getBoundingClientRect must be stubbed. */
 export function stubRect(el, { left = 0, top = 0, width = 200, height = 120 } = {}) {
   el.getBoundingClientRect = () => ({
@@ -51,13 +61,21 @@ export function stubRect(el, { left = 0, top = 0, width = 200, height = 120 } = 
 
 /**
  * jsdom has no PointerEvent, but a MouseEvent dispatched with a pointer type
- * name reaches pointerdown/pointermove/pointerup listeners just fine.
+ * name reaches pointerdown/pointermove/pointerup listeners just fine. The
+ * pointer fields are added by hand. `buttons` defaults to the left button held,
+ * except on pointerup and pointercancel.
  */
-export function firePointer(target, type, { clientX = 0, clientY = 0, button = 0 } = {}) {
+export function firePointer(target, type, {
+  clientX = 0, clientY = 0, button = 0, buttons, pointerId = 1, pointerType = 'mouse', isPrimary = true,
+} = {}) {
   const doc = target.ownerDocument || target;
+  const held = buttons ?? (type === 'pointerup' || type === 'pointercancel' ? 0 : 1);
   const event = new doc.defaultView.MouseEvent(type, {
-    bubbles: true, cancelable: true, clientX, clientY, button,
+    bubbles: true, cancelable: true, clientX, clientY, button, buttons: held,
   });
+  Object.defineProperty(event, 'pointerId', { value: pointerId });
+  Object.defineProperty(event, 'pointerType', { value: pointerType });
+  Object.defineProperty(event, 'isPrimary', { value: isPrimary });
   target.dispatchEvent(event);
   return event;
 }

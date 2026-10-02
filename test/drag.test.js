@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { stubRect, firePointer } from '../testlib/dom.js';
 import { attachDrag, clampPosition, DEFAULT_POS } from '../src/widget/drag.js';
 
-function setup(saved = null) {
+function setup(saved = null, rect = { left: 700, top: 120, width: 260, height: 80 }) {
   const dom = new JSDOM(
     '<!doctype html><body><div id="box"><div id="bar"><span id="title">title</span><button id="mute">x</button></div></div></body>',
     { pretendToBeVisual: true },
@@ -13,7 +13,7 @@ function setup(saved = null) {
   const doc = win.document;
   const element = doc.getElementById('box');
   const handle = doc.getElementById('bar');
-  stubRect(element, { left: 700, top: 120, width: 260, height: 80 });
+  stubRect(element, rect);
   let pos = saved;
   const saves = [];
   const drag = attachDrag({ handle, element, win, getPos: () => pos, setPos: (p) => { pos = p; saves.push(p); } });
@@ -84,6 +84,88 @@ test('destroy stops dragging', () => {
   const { doc, element, drag, saves } = setup();
   drag.destroy();
   firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130 });
+  firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210 });
+  firePointer(doc.body, 'pointerup', { clientX: 110, clientY: 210 });
+  assert.equal(element.style.left, '');
+  assert.deepEqual(saves, []);
+});
+
+test('apply() during a drag leaves the box where the pointer has it', () => {
+  const { doc, element, drag } = setup({ x: 300, y: 300 });
+  firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130 });
+  firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210 });
+  drag.apply();
+  assert.equal(element.style.left, '100px');
+  assert.equal(element.style.top, '200px');
+});
+
+test('a wobble under the threshold is still a click', () => {
+  const { doc, element, saves } = setup();
+  firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130 });
+  firePointer(doc.body, 'pointermove', { clientX: 711, clientY: 131 });
+  firePointer(doc.body, 'pointerup', { clientX: 711, clientY: 131 });
+  assert.deepEqual(saves, []);
+  assert.equal(element.style.left, '');
+});
+
+test('a drag whose release was missed ends at the next move with no button held', () => {
+  const { doc, element, saves } = setup();
+  firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130 });
+  firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210 });
+  firePointer(doc.body, 'pointermove', { clientX: 500, clientY: 400, buttons: 0 });
+  assert.equal(element.style.left, '100px', 'the box stays where it was let go');
+  assert.deepEqual(saves, [{ x: 100, y: 200 }]);
+  firePointer(doc.body, 'pointermove', { clientX: 600, clientY: 500 });
+  assert.equal(element.style.left, '100px', 'and no longer follows the pointer');
+});
+
+test('losing the window, the pointer capture or the pointer ends the drag', () => {
+  for (const ending of ['blur', 'lostpointercapture', 'pointercancel']) {
+    const { win, doc, handle, element, saves } = setup();
+    firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130 });
+    firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210 });
+    if (ending === 'blur') win.dispatchEvent(new win.Event('blur'));
+    else if (ending === 'lostpointercapture') handle.dispatchEvent(new win.Event('lostpointercapture'));
+    else firePointer(doc.body, 'pointercancel', { clientX: 110, clientY: 210 });
+    firePointer(doc.body, 'pointermove', { clientX: 500, clientY: 400 });
+    assert.deepEqual(saves, [{ x: 100, y: 200 }], ending);
+    assert.equal(element.style.left, '100px', ending);
+  }
+});
+
+test('only the pointer that started the drag moves the box', () => {
+  const { doc, element, saves } = setup();
+  const title = doc.getElementById('title');
+  firePointer(title, 'pointerdown', { clientX: 710, clientY: 130, pointerId: 1 });
+  firePointer(title, 'pointerdown', { clientX: 900, clientY: 130, pointerId: 2, pointerType: 'touch' });
+  firePointer(doc.body, 'pointermove', { clientX: 300, clientY: 300, pointerId: 2, pointerType: 'touch' });
+  assert.equal(element.style.left, '', 'a second finger moves nothing');
+  firePointer(doc.body, 'pointerup', { pointerId: 2, pointerType: 'touch' });
+  firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210, pointerId: 1 });
+  firePointer(doc.body, 'pointerup', { clientX: 110, clientY: 210, pointerId: 1 });
+  assert.deepEqual(saves, [{ x: 100, y: 200 }]);
+});
+
+test('a press on a link in the bar is left to the link', () => {
+  const { doc, saves } = setup();
+  const link = doc.createElement('a');
+  link.textContent = 'profile';
+  doc.getElementById('bar').append(link);
+  firePointer(link, 'pointerdown', { clientX: 710, clientY: 130 });
+  firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210 });
+  firePointer(doc.body, 'pointerup', { clientX: 110, clientY: 210 });
+  assert.deepEqual(saves, []);
+});
+
+test('the default corner keeps a tall box on screen', () => {
+  assert.equal(setup(null, { left: 700, top: 0, width: 260, height: 700 }).element.style.top, '68px');
+  assert.equal(setup(null, { left: 700, top: 0, width: 260, height: 900 }).element.style.top, '0px');
+});
+
+test('destroy in the middle of a drag leaves nothing behind', () => {
+  const { doc, element, drag, saves } = setup();
+  firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130 });
+  drag.destroy();
   firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210 });
   firePointer(doc.body, 'pointerup', { clientX: 110, clientY: 210 });
   assert.equal(element.style.left, '');
