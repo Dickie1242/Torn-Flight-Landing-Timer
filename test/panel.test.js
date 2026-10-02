@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { fakeClock, memoryArea, T0, MIN } from '../testlib/fakes.js';
 import { createStorage } from '../src/core/storage.js';
 import { formatClock } from '../src/core/time.js';
-import { createPanel, planTimer, describeStatus, PANEL_CLASS } from '../src/profile/panel.js';
+import { createPanel, planTimer, describeStatus, panelPosition, PANEL_CLASS, VARIANCE_WARN_CLASS } from '../src/profile/panel.js';
 
 const AIRSTRIP = {
   id: '1234567', name: 'SomeName', state: 'traveling', direction: 'to', destination: 'canada', plane: 'airstrip',
@@ -118,15 +118,20 @@ test('the buffer moves the ring time, and one past the flight rings now', () => 
   choose(p.win, p.buffer(), '30');
   assert.equal(p.summary(), `Rings now (${formatClock(T0)})`);
   choose(p.win, p.buffer(), '');
-  assert.equal(p.summary(), `Rings in 25 min (${formatClock(T0 + 25 * MIN)})`, 'an empty box means the default 2');
+  assert.equal(p.summary(), `Rings in 25 min (${formatClock(T0 + 25 * MIN)})`, 'an empty box means the last value used (2 here)');
 });
 
-test('the variance line scales with the flight', () => {
+test('the variance line scales with the flight and warns when it outgrows the buffer', () => {
   const short = setup({ ...AIRSTRIP, destination: 'mexico', plane: null });
   choose(short.win, short.radio('business'), 'business');
   assert.equal(short.variance(), 'Flights vary up to ~3% (under 1 min on this one)');
+  assert.equal(short.q(`.${PANEL_CLASS}__variance`).classList.contains(VARIANCE_WARN_CLASS), false);
   const long = setup({ ...AIRSTRIP, destination: 'southafrica', plane: 'commercial' });
+  assert.equal(long.variance(), 'Flights vary up to ~3% (about 8 min on this one): more than your buffer');
+  assert.equal(long.q(`.${PANEL_CLASS}__variance`).classList.contains(VARIANCE_WARN_CLASS), true);
+  choose(long.win, long.buffer(), '8');
   assert.equal(long.variance(), 'Flights vary up to ~3% (about 8 min on this one)');
+  assert.equal(long.q(`.${PANEL_CLASS}__variance`).classList.contains(VARIANCE_WARN_CLASS), false);
 });
 
 test('Start saves the timer and the buffer, then closes', () => {
@@ -184,4 +189,95 @@ test('a name is shown as text, never as markup', () => {
   const p = setup({ ...AIRSTRIP, name: '<img src=x onerror=alert(1)>' });
   assert.equal(p.root.querySelector('img'), null);
   assert.match(p.q(`.${PANEL_CLASS}__title`).textContent, /<img src=x onerror=alert\(1\)>/);
+});
+
+test('the timer starts when Start is pressed, not when the panel opened', () => {
+  const p = setup();
+  p.clock.tick(10 * MIN);
+  p.start().click();
+  const [timer] = p.storage.getTimers();
+  assert.equal(timer.startedAt, T0 + 10 * MIN);
+  assert.equal(timer.ringAt, T0 + 35 * MIN);
+});
+
+test('an open panel keeps its ring time current', () => {
+  const p = setup();
+  p.clock.tick(60 * 1000);
+  assert.equal(p.summary(), `Rings in 25 min (${formatClock(T0 + 26 * MIN)})`);
+});
+
+test('the buffer box shows the value actually used once the player leaves it', () => {
+  const p = setup(AIRSTRIP, { bufferMin: 7 });
+  for (const [typed, shown] of [['-3', '0'], ['2.6', '3'], ['31', '30'], ['', '7']]) {
+    p.buffer().value = typed;
+    p.buffer().dispatchEvent(new p.win.Event('change', { bubbles: true }));
+    assert.equal(p.buffer().value, shown, `typed ${JSON.stringify(typed)}`);
+  }
+});
+
+test('clearing the buffer box keeps the remembered buffer', () => {
+  const p = setup(AIRSTRIP, { bufferMin: 7 });
+  choose(p.win, p.buffer(), '');
+  p.start().click();
+  assert.equal(p.storage.getSetting('bufferMin'), 7);
+  assert.equal(p.storage.getTimers()[0].ringAt, T0 + 20 * MIN);
+});
+
+test('the panel opens under its button, above it when there is no room below, and inside the window', () => {
+  const view = { width: 1024, height: 768 };
+  const size = { width: 320, height: 300 };
+  assert.deepEqual(panelPosition({ left: 100, top: 200, bottom: 230 }, size, view), { left: 100, top: 236 });
+  assert.deepEqual(panelPosition({ left: 100, top: 700, bottom: 730 }, size, view), { left: 100, top: 394 }, 'flipped above');
+  assert.deepEqual(panelPosition({ left: 900, top: 200, bottom: 230 }, size, view), { left: 696, top: 236 }, 'kept off the right edge');
+  assert.deepEqual(panelPosition({ left: 100, top: 50, bottom: 80 }, { width: 320, height: 900 }, view), { left: 100, top: 8 },
+    'taller than the window: pinned to the top');
+});
+
+test('the keyboard starts on the first thing left to do and returns to the button on close', () => {
+  const p = setup();
+  assert.equal(p.doc.activeElement, p.start(), 'everything pre-filled: Start');
+  p.doc.dispatchEvent(new p.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(p.doc.activeElement, p.anchor);
+  const blank = setup({ ...AIRSTRIP, state: 'hidden', direction: null, destination: null, plane: null });
+  assert.equal(blank.doc.activeElement, blank.select(), 'nothing known: the destination');
+  const noPlane = setup({ ...AIRSTRIP, plane: null });
+  assert.equal(noPlane.doc.activeElement, noPlane.radio('standard'), 'country known: the planes');
+});
+
+test('a timer storage refuses keeps the panel open and says so', () => {
+  const p = setup();
+  p.storage.addTimer = () => null;
+  p.start().click();
+  assert.equal(p.panel.isOpen(), true);
+  assert.equal(p.summary(), 'Could not save this timer.');
+  assert.equal(p.storage.getSetting('bufferMin'), 2, 'nothing is saved either');
+});
+
+test('an unknown plane word is treated as no plane, not a crash', () => {
+  const p = setup({ ...AIRSTRIP, plane: 'personal' });
+  assert.equal(p.checked(), null);
+  assert.equal(p.status(), 'Torn → Canada · plane on profile: not shown');
+  assert.equal(setup({ ...AIRSTRIP, plane: 'constructor' }).checked(), null);
+});
+
+test('closing removes every listener and timer the panel added', () => {
+  const dom = new JSDOM('<!doctype html><body><button id="anchor">open</button></body>', { pretendToBeVisual: true });
+  const win = dom.window;
+  const doc = win.document;
+  let live = 0;
+  for (const target of [doc, win]) {
+    const add = target.addEventListener.bind(target);
+    const remove = target.removeEventListener.bind(target);
+    target.addEventListener = (...args) => { live += 1; return add(...args); };
+    target.removeEventListener = (...args) => { live -= 1; return remove(...args); };
+  }
+  const clock = fakeClock(T0);
+  const panel = createPanel({ doc, storage: createStorage({ area: memoryArea(), target: null, clock }), clock });
+  const anchor = doc.getElementById('anchor');
+  panel.open(anchor, AIRSTRIP);
+  panel.open(anchor, AIRSTRIP);
+  assert.ok(live > 0);
+  panel.close();
+  assert.equal(live, 0);
+  assert.equal(clock.pending(), 0, 'the refresh interval is cleared too');
 });

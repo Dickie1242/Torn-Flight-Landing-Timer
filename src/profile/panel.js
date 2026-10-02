@@ -3,12 +3,20 @@ import { realClock } from '../core/clock.js';
 import {
   DESTINATIONS, PLANES, PROFILE_PLANES, destinationName, minutesFor, varianceMinutes,
 } from '../core/flights.js';
-import { BUFFER, sanitizeBuffer } from '../core/storage.js';
+import { sanitizeBuffer, BUFFER } from '../core/storage.js';
 import { formatClock, formatMinutes } from '../core/time.js';
 
 export const PANEL_CLASS = 'landingtimer-panel';
+/** On the variance line when a flight can be off by more than the buffer. */
+export const VARIANCE_WARN_CLASS = `${PANEL_CLASS}__variance--warn`;
 
 const MINUTE = 60 * 1000;
+/** How often an open panel refreshes its "Rings in … (HH:MM)" line. */
+const REFRESH_MS = 15 * 1000;
+/** Space kept between the panel and the window's edge, px. */
+const EDGE = 8;
+/** Space between the panel and its button, px. */
+const OFFSET = 6;
 
 /**
  * The timer a Start press would create, or null until a destination and a
@@ -21,6 +29,11 @@ export function planTimer({ destination, plane, bufferMin, now }) {
   const landingAt = now + minutes * MINUTE;
   const ringAt = Math.max(now, landingAt - sanitizeBuffer(bufferMin) * MINUTE);
   return { minutes, startedAt: now, landingAt, ringAt };
+}
+
+/** What the profile showed about the plane, or null for nothing or an unknown word. */
+function seenPlane(status) {
+  return status.plane && Object.hasOwn(PROFILE_PLANES, status.plane) ? PROFILE_PLANES[status.plane] : null;
 }
 
 /**
@@ -39,8 +52,8 @@ export function describeStatus(status) {
   const place = destinationName(status.destination);
   if (status.state === 'hidden') return 'Travelling disguised: pick the destination and plane.';
   if (status.state === 'traveling') {
-    const plane = status.plane ? PROFILE_PLANES[status.plane].label : 'not shown';
-    return `${describeRoute(status.direction, place)} · plane on profile: ${plane}`;
+    const seen = seenPlane(status);
+    return `${describeRoute(status.direction, place)} · plane on profile: ${seen ? seen.label : 'not shown'}`;
   }
   if (status.state === 'abroad' && place) return `In ${place}. Not flying yet: the timer starts when you press Start.`;
   return 'Not flying right now: the timer starts when you press Start.';
@@ -48,16 +61,28 @@ export function describeStatus(status) {
 
 /** The note beside a plane: which one the profile showed, and Business's look-alike. */
 function planeTag(status, planeKey) {
-  if (!status.plane) return '';
-  if (planeKey === PROFILE_PLANES[status.plane].pick) return '← from profile';
+  const seen = seenPlane(status);
+  if (!seen) return '';
+  if (planeKey === seen.pick) return '← from profile';
   if (status.plane === 'commercial' && planeKey === 'business') return '← also Commercial';
   return '';
 }
 
 /**
+ * Where the panel goes: under its button, or above it when there is no room
+ * below, and always inside the window.
+ */
+export function panelPosition(anchorRect, size, view) {
+  const left = Math.min(Math.max(EDGE, anchorRect.left), Math.max(EDGE, view.width - size.width - EDGE));
+  let top = anchorRect.bottom + OFFSET;
+  if (top + size.height > view.height - EDGE) top = Math.max(EDGE, anchorRect.top - OFFSET - size.height);
+  return { left: Math.round(left), top: Math.round(top) };
+}
+
+/**
  * The popover a profile's Landing timer button opens. open(anchor, status)
- * shows it under `anchor`, filled in from a ProfileStatus; Start stores the
- * timer and closes it.
+ * shows it by `anchor`, filled in from a ProfileStatus; Start stores the timer
+ * and closes it.
  */
 export function createPanel({ doc = globalThis.document, storage, clock = realClock }) {
   const win = doc.defaultView;
@@ -72,13 +97,18 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     cleanup.push(() => target.removeEventListener(type, listener, capture));
   }
 
+  function readBuffer() {
+    const raw = parts.buffer.value.trim();
+    // An empty box means "as before": the last value used, not the default.
+    return raw === '' ? storage.getSetting('bufferMin') : sanitizeBuffer(Number(raw));
+  }
+
   function chosen() {
     const radio = parts.radios.find((r) => r.checked);
-    const raw = parts.buffer.value.trim();
     return {
       destination: parts.select.value || null,
       plane: radio ? radio.value : null,
-      bufferMin: raw === '' ? BUFFER.default : sanitizeBuffer(Number(raw)),
+      bufferMin: readBuffer(),
     };
   }
 
@@ -95,6 +125,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     if (!plan) {
       parts.summary.textContent = 'Pick a destination and a plane.';
       parts.variance.textContent = '';
+      parts.variance.classList.remove(VARIANCE_WARN_CLASS);
       return;
     }
     const wait = plan.ringAt - now;
@@ -102,14 +133,25 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
       ? `Rings in ${formatMinutes(wait / MINUTE)} (${formatClock(plan.ringAt)})`
       : `Rings now (${formatClock(plan.ringAt)})`;
     const spread = varianceMinutes(plan.minutes);
-    parts.variance.textContent = `Flights vary up to ~3% (${spread < 1 ? 'under 1 min' : `about ${spread} min`} on this one)`;
+    const beyondBuffer = spread > bufferMin;
+    parts.variance.textContent = `Flights vary up to ~3% (${spread < 1 ? 'under 1 min' : `about ${spread} min`} on this one)`
+      + (beyondBuffer ? ': more than your buffer' : '');
+    parts.variance.classList.toggle(VARIANCE_WARN_CLASS, beyondBuffer);
+  }
+
+  /** Once the player leaves the box, show the buffer that is actually used. */
+  function tidyBuffer() {
+    if (!parts) return;
+    parts.buffer.value = String(readBuffer());
+    update();
   }
 
   function startTimer() {
+    if (!parts) return;
     const { destination, plane, bufferMin } = chosen();
     const plan = planTimer({ destination, plane, bufferMin, now: clock.now() });
     if (!plan) return;
-    storage.addTimer({
+    const saved = storage.addTimer({
       // Storage refuses ids over 80 characters; Torn names are far shorter, but a misread one must not be.
       id: status.id || `name:${(status.name || 'unknown').slice(0, 64)}`,
       name: status.name || (status.id ? `#${status.id}` : 'Unknown player'),
@@ -119,12 +161,18 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
       ...plan,
       rungAt: null,
     });
+    if (!saved) {
+      // Never lose a timer quietly: stay open so the player knows.
+      parts.summary.textContent = 'Could not save this timer.';
+      return;
+    }
     storage.setSetting('bufferMin', bufferMin);
     close();
   }
 
   function build() {
-    const pick = status.plane ? PROFILE_PLANES[status.plane].pick : null;
+    const seen = seenPlane(status);
+    const pick = seen ? seen.pick : null;
     const select = el(doc, 'select', { attrs: { name: 'destination' }, on: { change: update } }, [
       el(doc, 'option', { text: 'Pick a country', attrs: { value: '' } }),
       ...DESTINATIONS.map((d) => el(doc, 'option', { text: d.name, attrs: { value: d.key } })),
@@ -151,11 +199,11 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
 
     const buffer = el(doc, 'input', {
       attrs: { type: 'number', name: 'buffer', min: BUFFER.min, max: BUFFER.max, step: 1 },
-      on: { input: update },
+      on: { input: update, change: tidyBuffer },
     });
     buffer.value = String(storage.getSetting('bufferMin'));
 
-    const summary = el(doc, 'div', { className: `${PANEL_CLASS}__summary` });
+    const summary = el(doc, 'div', { className: `${PANEL_CLASS}__summary`, attrs: { 'aria-live': 'polite' } });
     const variance = el(doc, 'div', { className: `${PANEL_CLASS}__variance` });
     const start = el(doc, 'button', { text: 'Start', attrs: { type: 'button', 'data-action': 'start' }, on: { click: startTimer } });
     const cancel = el(doc, 'button', { text: 'Cancel', attrs: { type: 'button', 'data-action': 'cancel' }, on: { click: () => close() } });
@@ -170,7 +218,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
       ]),
       el(doc, 'div', { className: `${PANEL_CLASS}__status`, text: describeStatus(status) }),
       el(doc, 'label', { className: `${PANEL_CLASS}__row` }, ['Destination ', select]),
-      el(doc, 'div', { className: `${PANEL_CLASS}__planes` }, planeRows),
+      el(doc, 'div', { className: `${PANEL_CLASS}__planes`, attrs: { role: 'radiogroup', 'aria-label': 'Plane' } }, planeRows),
       el(doc, 'label', { className: `${PANEL_CLASS}__row` }, ['Ring ', buffer, ' min early']),
       summary,
       variance,
@@ -178,16 +226,33 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     ]);
   }
 
-  /** Under the anchor, kept inside the window horizontally. */
+  function viewport() {
+    const html = doc.documentElement;
+    // clientWidth leaves out the page's scrollbar; innerWidth does not.
+    return {
+      width: (html && html.clientWidth) || win.innerWidth,
+      height: (html && html.clientHeight) || win.innerHeight,
+    };
+  }
+
   function position() {
-    const rect = anchor.getBoundingClientRect();
-    const width = root.offsetWidth || 320;
-    const maxLeft = Math.max(8, (win ? win.innerWidth : 1024) - width - 8);
-    root.style.left = `${Math.round(Math.min(Math.max(8, rect.left), maxLeft))}px`;
-    root.style.top = `${Math.round(rect.bottom + 6)}px`;
+    if (!root) return;
+    const size = { width: root.offsetWidth || 320, height: root.offsetHeight || 0 };
+    const { left, top } = panelPosition(anchor.getBoundingClientRect(), size, viewport());
+    root.style.left = `${left}px`;
+    root.style.top = `${top}px`;
+  }
+
+  /** Puts the keyboard on the first thing the player still has to do. */
+  function focusFirst() {
+    if (!parts.select.value) parts.select.focus();
+    else if (!parts.radios.some((r) => r.checked)) parts.radios[0].focus();
+    else parts.start.focus();
   }
 
   function close() {
+    // Hand the keyboard back to the button only if it was in the panel.
+    const returnFocus = root && anchor && root.contains(doc.activeElement) ? anchor : null;
     for (const off of cleanup) off();
     cleanup = [];
     if (root) root.remove();
@@ -195,6 +260,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     parts = null;
     anchor = null;
     status = null;
+    if (returnFocus) returnFocus.focus();
   }
 
   function open(anchorElement, profileStatus) {
@@ -203,14 +269,20 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     status = profileStatus;
     root = build();
     doc.body.append(root);
-    position();
     update();
+    position();
+    focusFirst();
     listen(doc, 'keydown', (event) => {
       if (event.key === 'Escape') close();
-    });
+    }, true);
     listen(doc, 'pointerdown', (event) => {
       if (root && !root.contains(event.target) && !anchor.contains(event.target)) close();
     }, true);
+    listen(win, 'resize', position);
+    listen(doc, 'scroll', position, true);
+    // Keep "Rings in … (HH:MM)" true while the panel sits open.
+    const refresh = clock.setInterval(update, REFRESH_MS);
+    cleanup.push(() => clock.clearInterval(refresh));
   }
 
   return {
