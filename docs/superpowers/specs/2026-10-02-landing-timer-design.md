@@ -82,9 +82,10 @@ anything it cannot read. It never throws.
 - `direction`: `to` (outbound from Torn), `from` (returning to Torn), or `null`.
 - `destination`: a key from section 3, the foreign country in either
   direction, also filled in for `abroad` ("In Mexico").
-- `plane`: what the profile shows, mapped to a key: `commercial` → `standard`
-  (Business looks identical on the profile, so Standard is the pick),
-  `airstrip` → `airstrip`, `private` → `private`. Only when travelling.
+- `plane`: what the profile shows, `commercial`, `airstrip` or `private`, and
+  only when travelling. `flights.js` maps it to the plane the panel picks
+  (`PROFILE_PLANES`): Commercial picks `standard`, because Business looks
+  identical on a profile; the others pick themselves.
 - `id`: the `XID` query parameter, otherwise from the page. `name`: from the
   profile page, otherwise `#<id>`.
 
@@ -95,20 +96,27 @@ Sources, in order of trust (all lookups live in `src/core/selectors.js`):
    `travelling from <country words> <flightType>`, with `flightType` one of
    `commercial | airstrip | private`. A country is recognised from any of its
    tokens (`mexico`, `cayman`, `canada`, `hawaii`, `kingdom`, `argentina`,
-   `switzerland`, `japan`, `china`, `uae`, `africa`).
-2. **The status `aria-label`**: `"Traveling from <text>. Type of plane:
-   Commercial | Personal | Private"` (Personal = airstrip).
-3. **The visible status text**: "Torn to Mexico", "Mexico to Torn",
+   `switzerland`, `japan`, `china`, `uae`, `africa`). **Seen live
+   2026-10-02:** a Commercial flight to Canada had the classes
+   `profile-status m-top10 travelling to canada  ` with no flight-type word,
+   so for Commercial the plane comes from source 2.
+2. **The status `aria-label`** on `span.main-desc`: `"Traveling from <text>.
+   Type of plane: Commercial | Personal | Private"` (Personal = airstrip).
+   Seen live: `"Traveling from Torn to Canada  . Type of plane: Commercial"`,
+   with spaces before the full stop.
+3. **The visible status text** (`span.main-desc > span[aria-hidden]`, seen
+   live as "Torn to Canada "): "Torn to Mexico", "Mexico to Torn",
    "In Mexico", "Hiding out in Mexico", "Traveling" (disguised), and the
    older wording still used in the hospital and jail variants: "Traveling to
    Mexico", "Returning to Torn from Japan". "UAE" and "United Arab Emirates"
    both match.
 
 These selectors come from Torn's stylesheet and app code, not from a live
-page. **Before the parser is written**, the player sends the real outerHTML
-of a travelling player's status box (README: "How to send the profile HTML"),
-ideally one outbound, one return and one abroad. They become the test fixtures
-and confirm or correct the selectors.
+page. The parser is first built and tested against markup written to that
+description. **Before release**, the player sends the real outerHTML of a
+travelling player's status box and name heading (README: "How to send the
+profile HTML"), ideally one outbound, one return and one abroad. They become
+test fixtures that confirm or correct the selectors.
 
 ## 5. User-facing behaviour
 
@@ -249,6 +257,10 @@ src/core/selectors.js           EVERY Torn DOM lookup
 src/core/storage.js             landingtimer.v1, sanitising, cross-tab events
 src/core/alarm.js               scheduling, the exactly-once claim, Web Audio chime
 src/core/time.js                countdown and clock formatting
+src/core/clock.js               the real clock (now + timers), injectable so tests drive time
+src/core/dom.js                 el(): builds elements, page text always as text
+src/core/log.js                 prefixed console helpers, safe()
+src/core/version.js, styles.js  build version, stylesheet injection
 src/profile/readStatus.js       profile DOM → { id, name, state, direction, destination, plane }
 src/profile/button.js           the profile button + re-insertion observer
 src/profile/panel.js            the popover
@@ -256,7 +268,8 @@ src/widget/widget.js            the floating box: rows, states, ✕, tick
 src/widget/drag.js              title-bar drag, saved position, keep on screen
 test/fixtures/*.html            real profile status markup sent by the player
 test/*.test.js                  node --test suites
-testlib/dom.js                  jsdom helpers
+testlib/dom.js                  jsdom helpers, profile markup builder
+testlib/fakes.js                fake clock, fake Web Locks, in-memory storage, a sample timer
 ```
 
 The header has `@name Landing Timer`, `@namespace landingtimer.torn`,
@@ -295,10 +308,14 @@ Timer" <torn-landing-timer@noreply.invalid>), as in Chat+.
   text; ✕; drag clamping and the saved position.
 - `button.test.js`: inserted once, re-inserted after a redraw, accent only
   when travelling, absent off `profiles.php`.
-- `build.test.js`: the header is present and correct, the version is stamped,
-  and `dist/` contains none of `fetch(`, `XMLHttpRequest`,
-  `GM_xmlhttpRequest`, `@connect`, or a `@grant` other than `none` (the
-  rule-safety guard).
+- `build.test.js`:
+  - The header is present and correct, and the version is stamped.
+  - The rule-safety guard: `dist/` contains none of `fetch(`,
+    `XMLHttpRequest`, `GM_xmlhttpRequest`, `sendBeacon`, `WebSocket`,
+    `EventSource`, `@connect`, `@require`, or a `@grant` other than `none`.
+  - A smoke test runs the built bundle in jsdom. On a profile it gives the
+    styles, the button, a pre-filled panel, and a row after Start. Off a
+    profile it gives a hidden timer box and no button.
 
 The README carries a manual acceptance checklist for a live Torn session:
 - The button appears on a travelling profile with the right pre-fill.
