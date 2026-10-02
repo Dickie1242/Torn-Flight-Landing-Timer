@@ -1849,6 +1849,14 @@ git add src/core/selectors.js src/profile/readStatus.js test/readStatus.test.js 
 git commit -m "feat: read destination, direction and plane from the profile status" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
+> **Amended after code review.** The code above was built as written, then changed in a follow-up commit. The committed files are authoritative.
+> - **Class names:** `parseClasses` claims nothing unless the classes name a country, and gives a null direction when both `to` and `from` are present.
+> - **Route as one piece:** `readStatus` takes the route (direction and destination) together through `pickRoute`. If two sources name different countries, both are left blank, because a wrong pre-fill is worse than a blank. If they disagree only about the direction, the direction is blank and the agreed country is kept, since a flight takes as long either way. The panel (Task 7) shows a blank direction as "Flying to or from …".
+> - **Plane:** if two sources disagree about the plane, it is left blank too.
+> - **Plane label:** `PLANE_LABEL_SELECTOR` is case-insensitive.
+> - **Heading:** the pattern accepts "James' Profile".
+> - **New words:** `emirates` and `cayman` are recognised.
+
 ---
 
 ### Task 7: The element builder and the panel
@@ -1951,6 +1959,10 @@ test('the status line reads the profile back', () => {
   assert.equal(describeStatus({ ...AIRSTRIP, direction: 'from', destination: 'uk', plane: 'commercial' }),
     'United Kingdom → Torn · plane on profile: Commercial');
   assert.equal(describeStatus({ ...AIRSTRIP, plane: null }), 'Torn → Canada · plane on profile: not shown');
+  assert.equal(describeStatus({ ...AIRSTRIP, direction: null }), 'Flying to or from Canada · plane on profile: Airstrip',
+    'an unclear direction is not shown as outbound');
+  assert.equal(describeStatus({ ...AIRSTRIP, direction: null, destination: null }),
+    'Flying, destination unclear · plane on profile: Airstrip');
   assert.equal(describeStatus({ ...AIRSTRIP, state: 'hidden', direction: null, destination: null, plane: null }),
     'Travelling disguised: pick the destination and plane.');
   assert.equal(describeStatus({ ...AIRSTRIP, state: 'abroad', direction: null, destination: 'mexico', plane: null }),
@@ -2107,14 +2119,24 @@ export function planTimer({ destination, plane, bufferMin, now }) {
   return { minutes, startedAt: now, landingAt, ringAt };
 }
 
+/**
+ * The route as the profile gave it. The reader leaves the direction blank when
+ * the page is unclear, and the panel must not guess one back in; a flight takes
+ * as long either way.
+ */
+function describeRoute(direction, place) {
+  if (direction === 'to') return `Torn → ${place || '?'}`;
+  if (direction === 'from') return `${place || '?'} → Torn`;
+  return place ? `Flying to or from ${place}` : 'Flying, destination unclear';
+}
+
 /** The panel's one-line reading of the profile. */
 export function describeStatus(status) {
   const place = destinationName(status.destination);
   if (status.state === 'hidden') return 'Travelling disguised: pick the destination and plane.';
   if (status.state === 'traveling') {
-    const route = status.direction === 'from' ? `${place || '?'} → Torn` : `Torn → ${place || '?'}`;
     const plane = status.plane ? PROFILE_PLANES[status.plane].label : 'not shown';
-    return `${route} · plane on profile: ${plane}`;
+    return `${describeRoute(status.direction, place)} · plane on profile: ${plane}`;
   }
   if (status.state === 'abroad' && place) return `In ${place}. Not flying yet: the timer starts when you press Start.`;
   return 'Not flying right now: the timer starts when you press Start.';
