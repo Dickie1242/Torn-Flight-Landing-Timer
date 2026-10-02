@@ -1,0 +1,3 @@
+node_modules/
+
+# dist/ is committed on purpose: it is the file you paste into Tampermonkey.
