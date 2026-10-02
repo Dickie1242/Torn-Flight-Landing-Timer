@@ -1,6 +1,7 @@
 /**
- * The ONLY module that knows the shape of Torn's profile page.
- * If Torn changes its markup, this is the one file to edit.
+ * The ONLY module that knows WHERE things are on Torn's profile page.
+ * What Torn WRITES there (status wordings, class words) lives in
+ * src/profile/readStatus.js. If Torn changes its page, one of the two changes.
  *
  * Hashed CSS-module class names (e.g. interactionLog___lLO31) must never
  * appear here: they change between Torn builds. Neither may anything another
@@ -19,7 +20,7 @@ export const STATUS_TEXT_SELECTOR = '.main-desc > span[aria-hidden]';
 /** Fallback if the inner span goes: the whole description. */
 export const STATUS_DESC_SELECTOR = '.main-desc';
 /** span.main-desc's aria-label: "Traveling from Torn to Canada  . Type of plane: Commercial". */
-export const PLANE_LABEL_SELECTOR = '[aria-label*="Type of plane"]';
+export const PLANE_LABEL_SELECTOR = '[aria-label*="type of plane" i]';
 /** The page heading, "<name>'s Profile". To be confirmed against a real capture. */
 export const PROFILE_HEADING_SELECTOR = '#skip-to-content';
 
@@ -67,7 +68,7 @@ export function profileIdFromUrl(href) {
 /** @returns {{ name: string|null, id: string|null }} whose profile the page says this is. */
 export function profileIdentity(doc) {
   const heading = doc ? doc.querySelector(PROFILE_HEADING_SELECTOR) : null;
-  const fromHeading = heading ? /^(.+?)['’]s Profile$/i.exec(squash(heading.textContent)) : null;
+  const fromHeading = heading ? /^(.+?)['’]s? Profile$/i.exec(squash(heading.textContent)) : null;
   const fromTitle = doc && typeof doc.title === 'string' ? /^\s*(.+?)\s*\[(\d+)\]/.exec(doc.title) : null;
   return {
     name: fromHeading ? fromHeading[1] : (fromTitle ? fromTitle[1] : null),

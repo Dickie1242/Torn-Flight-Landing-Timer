@@ -4,6 +4,7 @@ import { statusHtml, profileDoc, PROFILE_URL } from '../testlib/dom.js';
 import {
   readStatus, parseClasses, parsePlaneLabel, parseStatusText, countryFromName,
 } from '../src/profile/readStatus.js';
+import { isProfilePage } from '../src/core/selectors.js';
 
 function read(status, docOptions = {}) {
   const dom = profileDoc({ status: statusHtml(status), ...docOptions });
@@ -37,7 +38,7 @@ test('every country is recognised from its class words', () => {
   const cases = {
     mexico: 'mexico', 'cayman islands': 'cayman', canada: 'canada', hawaii: 'hawaii',
     'united kingdom': 'uk', argentina: 'argentina', switzerland: 'switzerland', japan: 'japan',
-    china: 'china', uae: 'uae', 'south africa': 'southafrica',
+    china: 'china', uae: 'uae', 'south africa': 'southafrica', 'united arab emirates': 'uae',
   };
   for (const [words, key] of Object.entries(cases)) {
     assert.equal(parseClasses(['travelling', 'to', ...words.split(' ')]).destination, key, words);
@@ -47,7 +48,9 @@ test('every country is recognised from its class words', () => {
 test('classes with no route claim nothing', () => {
   assert.deepEqual(parseClasses(['profile-status', 'm-top10']), {});
   assert.deepEqual(parseClasses(['profile-status', 'travelling']), {});
-  assert.deepEqual(parseClasses(['travelling', 'to', 'constructor']).destination, null);
+  assert.deepEqual(parseClasses(['travelling', 'to', 'constructor']), {});
+  assert.deepEqual(parseClasses(['travelling', 'to']), {}, 'a bare direction is no route');
+  assert.deepEqual(parseClasses(null), {});
 });
 
 test('the plane label alone gives direction, destination and plane', () => {
@@ -117,4 +120,38 @@ test('the name comes from the heading first, then the title', () => {
   assert.equal(read({}, { heading: "SomeName's Profile" }).name, 'SomeName');
   assert.equal(read({}, { heading: 'Profile', title: 'OtherName [7654321] | TORN' }).name, 'OtherName');
   assert.equal(read({}, { heading: 'Profile', title: 'TORN' }).name, null);
+});
+
+test('classes naming both directions leave the direction to the other sources', () => {
+  assert.equal(parseClasses(['travelling', 'from', 'mexico', 'to', 'torn']).direction, null);
+  assert.deepEqual(read({
+    classes: 'profile-status m-top10 travelling from mexico to torn',
+    label: 'Traveling from Mexico to Torn. Type of plane: Private',
+  }), { ...PLAYER, state: 'traveling', direction: 'from', destination: 'mexico', plane: 'private' });
+});
+
+test('a bare "travelling to" in the classes does not hide a disguised flight', () => {
+  assert.deepEqual(read({ classes: 'profile-status m-top10 travelling to  ', text: 'Traveling' }),
+    { ...PLAYER, state: 'hidden', direction: null, destination: null, plane: null });
+});
+
+test('sources that disagree about the route leave it blank rather than guess', () => {
+  assert.deepEqual(read({ classes: 'profile-status m-top10 travelling to canada airstrip', text: 'Japan to Torn' }),
+    { ...PLAYER, state: 'traveling', direction: null, destination: null, plane: 'airstrip' });
+});
+
+test('the American class spelling, short country names and the plane label in any case are understood', () => {
+  assert.equal(parseClasses(['traveling', 'to', 'japan']).destination, 'japan');
+  assert.deepEqual(parseStatusText('Torn to Cayman'), { state: 'traveling', direction: 'to', destination: 'cayman' });
+  assert.equal(read({ label: 'Traveling from Torn to Japan. TYPE OF PLANE: Private' }).plane, 'private');
+});
+
+test('a name ending in s has a bare apostrophe in the heading', () => {
+  assert.equal(read({}, { heading: "James' Profile" }).name, 'James');
+});
+
+test('isProfilePage is true only on profiles.php', () => {
+  assert.equal(isProfilePage({ pathname: '/profiles.php' }), true);
+  assert.equal(isProfilePage({ pathname: '/index.php' }), false);
+  assert.equal(isProfilePage(null), false);
 });

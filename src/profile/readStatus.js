@@ -15,6 +15,7 @@ const COUNTRY_CLASS = new Map([
   ['mexico', 'mexico'], ['cayman', 'cayman'], ['canada', 'canada'], ['hawaii', 'hawaii'],
   ['kingdom', 'uk'], ['argentina', 'argentina'], ['switzerland', 'switzerland'],
   ['japan', 'japan'], ['china', 'china'], ['uae', 'uae'], ['africa', 'southafrica'],
+  ['emirates', 'uae'],
 ]);
 
 /** Country names as Torn writes them in status text, lower-cased. */
@@ -22,7 +23,7 @@ const COUNTRY_NAME = new Map([
   ['mexico', 'mexico'], ['cayman islands', 'cayman'], ['canada', 'canada'], ['hawaii', 'hawaii'],
   ['united kingdom', 'uk'], ['uk', 'uk'], ['argentina', 'argentina'], ['switzerland', 'switzerland'],
   ['japan', 'japan'], ['china', 'china'], ['uae', 'uae'], ['united arab emirates', 'uae'],
-  ['south africa', 'southafrica'],
+  ['south africa', 'southafrica'], ['cayman', 'cayman'],
 ]);
 
 /** Plane words in the status classes. Commercial has none (seen live 2026-10-02). */
@@ -40,17 +41,23 @@ export function countryFromName(text) {
   return COUNTRY_NAME.get(key) || null;
 }
 
-/** Reads the status box's classes. Claims nothing unless they name a route. */
+/**
+ * Reads the status box's classes. Claims nothing unless they name a country:
+ * Torn fills a class template and leaves empty slots blank, so a bare
+ * "travelling to" may be a disguised flight.
+ */
 export function parseClasses(classes) {
+  if (!Array.isArray(classes)) return {};
   if (!classes.includes('travelling') && !classes.includes('traveling')) return {};
-  const direction = classes.includes('to') ? 'to' : (classes.includes('from') ? 'from' : null);
   const country = classes.find((name) => COUNTRY_CLASS.has(name));
-  const destination = country ? COUNTRY_CLASS.get(country) : null;
-  if (!direction && !destination) return {};
+  if (!country) return {};
+  const hasTo = classes.includes('to');
+  const hasFrom = classes.includes('from');
   return {
     state: 'traveling',
-    direction,
-    destination,
+    // Both words, or neither, and the classes cannot say which way.
+    direction: hasTo === hasFrom ? null : (hasTo ? 'to' : 'from'),
+    destination: COUNTRY_CLASS.get(country),
     plane: classes.find((name) => PLANE_CLASS.has(name)) || null,
   };
 }
@@ -92,9 +99,25 @@ export function parsePlaneLabel(label) {
 }
 
 /**
+ * Where the player is going, as one piece. Sources that disagree about the
+ * country or the direction leave both blank: a wrong pre-fill is worse than a
+ * blank the player fills in.
+ */
+function pickRoute(sources) {
+  const destinations = new Set(sources.map((s) => s.destination).filter(Boolean));
+  const directions = new Set(sources.map((s) => s.direction).filter(Boolean));
+  if (destinations.size > 1 || directions.size > 1) return { direction: null, destination: null };
+  return {
+    direction: directions.size ? [...directions][0] : null,
+    destination: destinations.size ? [...destinations][0] : null,
+  };
+}
+
+/**
  * Everything the open profile says about where its player is going. The
- * classes are trusted first, then the plane label, then the visible text; a
- * field nothing could read is null. Never throws on a strange page.
+ * state and the plane come from the most trusted source that has one; the
+ * route comes from `pickRoute`. A field nothing could read is null. Never
+ * throws on a strange page.
  * @returns {ProfileStatus}
  */
 export function readStatus(doc, href) {
@@ -111,12 +134,13 @@ export function readStatus(doc, href) {
   const identity = selectors.profileIdentity(doc);
   const state = pick('state') || 'other';
   const travelling = state === 'traveling';
+  const route = pickRoute(sources);
   return {
     id: selectors.profileIdFromUrl(href) || identity.id,
     name: identity.name,
     state,
-    direction: travelling ? pick('direction') : null,
-    destination: travelling || state === 'abroad' ? pick('destination') : null,
+    direction: travelling ? route.direction : null,
+    destination: (travelling || state === 'abroad') ? route.destination : null,
     plane: travelling ? pick('plane') : null,
   };
 }
