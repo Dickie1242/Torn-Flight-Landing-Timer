@@ -158,7 +158,8 @@ test('two tabs, one chime', async () => {
 });
 
 test('with storage that is slow to reach other tabs, holding the lock is what keeps it to one chime', async () => {
-  for (const [holdMs, chimes] of [[0, 2], [5000, 1]]) {
+  const chimes = [];
+  for (const holdMs of [0, 5000]) {
     const clock = fakeClock(T0);
     const [areaA, areaB] = laggyAreas(clock, 1500, 2);
     seed(areaA, clock, makeTimer());
@@ -167,8 +168,10 @@ test('with storage that is slow to reach other tabs, holding the lock is what ke
     const a = tab({ area: areaA, clock, locks, holdMs });
     const b = tab({ area: areaB, clock, locks, holdMs });
     await run(clock, 25 * MIN + 10_000, 100);
-    assert.equal(a.plays.length + b.plays.length, chimes, `hold ${holdMs} ms`);
+    chimes.push(a.plays.length + b.plays.length);
   }
+  assert.ok(chimes[0] >= 2, `without the hold the slow write lets a second tab chime (${chimes[0]})`);
+  assert.equal(chimes[1], 1, 'with the hold, one chime');
 });
 
 test('timers due together ring with one chime', async () => {
@@ -274,4 +277,27 @@ test('destroy cancels every timer, and a check already queued does nothing', asy
   await flush();
   assert.deepEqual(t.plays, []);
   assert.equal(clock.pending(), 0);
+});
+
+test('a timer that comes due while this tab is busy ringing rings right after, not at the next check', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock,
+    makeTimer({ id: 'x' }),
+    makeTimer({ id: 'y', ringAt: T0 + 25 * MIN + 2000, landingAt: T0 + 27 * MIN + 2000 }));
+  const t = tab({ area, clock, locks: fakeLocks(), holdMs: 5000 });
+  await run(clock, 25 * MIN + 10_000, 100);
+  assert.equal(t.plays.length, 2);
+  assert.ok(t.plays[1] - (T0 + 25 * MIN) < 6000, `the second chime came ${t.plays[1] - (T0 + 25 * MIN)} ms after the first`);
+});
+
+test('the click on Start lets sound start, even though the timer did not exist when the press began', () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const t = tab({ area, clock, locks: fakeLocks() });
+  t.win.dispatchEvent(new Event('pointerdown'));
+  assert.equal(t.audio.unlocks, 0, 'no timer yet');
+  t.storage.addTimer(makeTimer()); // what the Start button's own click handler does
+  t.win.dispatchEvent(new Event('click'));
+  assert.equal(t.audio.unlocks, 1);
 });

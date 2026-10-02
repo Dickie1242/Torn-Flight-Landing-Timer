@@ -66,6 +66,7 @@ export function createAlarm({
   let unsubscribe = null;
   let started = false;
   let claiming = false;
+  let retryPending = false;
   let locksBroken = false;
 
   const safePlay = safe('alarm.play', () => audio.play());
@@ -84,16 +85,28 @@ export function createAlarm({
     // Decided on what is stored now: a mute in another tab a moment ago counts.
     const sound = !!storage.getSetting('sound');
     const audible = [];
+    let marked = 0;
     for (const timer of due) {
       if (sound && !isLate(timer, now)) audible.push(timer);
-      else storage.markRung(timer.id, now);
+      else if (storage.markRung(timer.id, now)) marked += 1;
     }
     // A tab that cannot make sound leaves an audible ring for one that can.
-    if (audible.length === 0 || !(await audio.ready())) return;
-    const rung = audible.filter((timer) => storage.markRung(timer.id, clock.now()));
-    if (rung.length === 0) return;
-    safePlay();
-    if (holdMs > 0) await new Promise((resolve) => clock.setTimeout(resolve, holdMs));
+    if (audible.length > 0 && (await audio.ready())) {
+      const rung = audible.filter((timer) => storage.markRung(timer.id, clock.now()));
+      if (rung.length > 0) safePlay();
+      marked += rung.length;
+    }
+    // Hold the lock while what this tab marked, silent or not, reaches the others.
+    if (marked > 0 && holdMs > 0) await new Promise((resolve) => clock.setTimeout(resolve, holdMs));
+  }
+
+  function retrySoon() {
+    if (retryPending) return;
+    retryPending = true;
+    clock.setTimeout(() => {
+      retryPending = false;
+      tick();
+    }, RETRY_MS);
   }
 
   function claim() {
@@ -101,7 +114,7 @@ export function createAlarm({
       return locks.request(LOCK_NAME, { ifAvailable: true }, (lock) => {
         if (lock) return ringDue();
         // Another tab is ringing, and holds the lock while its write spreads: look again soon.
-        clock.setTimeout(tick, RETRY_MS);
+        retrySoon();
         return undefined;
       });
     }
@@ -135,6 +148,9 @@ export function createAlarm({
       })
       .finally(() => {
         claiming = false;
+        // A timer that came due while this tab was busy ringing: look again now,
+        // rather than at the next 1 s check, which a hidden tab may run late.
+        if (started && !retryPending && waiting().some((t) => t.ringAt <= clock.now())) clock.setTimeout(tick, 0);
       });
   }
 
@@ -189,6 +205,8 @@ export function createAlarm({
     if (win) {
       win.addEventListener('focus', tick);
       for (const type of GESTURES) win.addEventListener(type, onGesture, true);
+      // Bubbling, so it runs after the click's own handler: a Start click has just added its timer.
+      win.addEventListener('click', onGesture);
     }
     if (doc) doc.addEventListener('visibilitychange', tick);
     onChange();
@@ -204,6 +222,7 @@ export function createAlarm({
     if (win) {
       win.removeEventListener('focus', tick);
       for (const type of GESTURES) win.removeEventListener(type, onGesture, true);
+      win.removeEventListener('click', onGesture);
     }
     if (doc) doc.removeEventListener('visibilitychange', tick);
   }

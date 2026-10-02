@@ -13,8 +13,12 @@ export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT
   /** A ready() found this tab unable to play, and no gesture has come since. */
   let blocked = false;
 
+  /** Running beats every other signal: the browser has said yes. */
+  const running = () => !!context && context.state === 'running';
+
   function getContext() {
-    if (context) return context;
+    // A closed context can never run again; make a new one.
+    if (context && context.state !== 'closed') return context;
     const AudioCtx = win && (win.AudioContext || win.webkitAudioContext);
     if (!AudioCtx) return null;
     try {
@@ -56,7 +60,14 @@ export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT
       return false;
     }
     if (ctx.state !== 'running') {
-      await Promise.race([resume(ctx), new Promise((resolve) => win.setTimeout(resolve, timeoutMs))]);
+      const starting = resume(ctx);
+      await Promise.race([starting, new Promise((resolve) => win.setTimeout(resolve, timeoutMs))]);
+      // A context that starts after we stopped waiting is still good news.
+      if (ctx.state !== 'running') {
+        starting.then(() => {
+          if (running()) blocked = false;
+        });
+      }
     }
     blocked = ctx.state !== 'running';
     return !blocked;
@@ -86,7 +97,7 @@ export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT
 
   /** A ring found this tab unable to play, and no click has come since. */
   function isBlocked() {
-    return blocked;
+    return blocked && !running();
   }
 
   /**
@@ -95,8 +106,8 @@ export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT
    * found it blocked.
    */
   function likely() {
+    if (running()) return true;
     if (blocked) return false;
-    if (context && context.state === 'running') return true;
     const activation = win && win.navigator && win.navigator.userActivation;
     return activation ? !!activation.hasBeenActive : true;
   }

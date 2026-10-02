@@ -4,8 +4,8 @@ import { createAudio } from '../src/core/audio.js';
 
 /**
  * A window with a stand-in AudioContext. `resume` says what the browser does
- * when asked to start: 'start', 'reject' (WebKit outside a gesture), or 'hang'
- * (Chrome holding it back until a gesture).
+ * when asked to start: 'start', 'late' (starts 20 ms later), 'reject' (WebKit
+ * outside a gesture), or 'hang' (Chrome holding it back until a gesture).
  */
 function fakeWin({ state = 'suspended', resume = 'start', activated = false } = {}) {
   const made = [];
@@ -24,6 +24,12 @@ function fakeWin({ state = 'suspended', resume = 'start', activated = false } = 
         return Promise.resolve();
       }
       if (resume === 'reject') return Promise.reject(Object.assign(new Error('not allowed'), { name: 'NotAllowedError' }));
+      if (resume === 'late') {
+        return new Promise((resolve) => setTimeout(() => {
+          this.state = 'running';
+          resolve();
+        }, 20));
+      }
       return new Promise(() => {});
     }
 
@@ -102,4 +108,34 @@ test('with no Web Audio at all it is never ready, never plays and never throws',
   assert.equal(audio.play(), false);
   audio.unlock();
   assert.equal(audio.likely(), true, 'nothing to say about clicks either');
+});
+
+test('a context that starts after ready() stopped waiting is not left blocked', async () => {
+  const { win } = fakeWin({ resume: 'late' });
+  const audio = createAudio({ win, timeoutMs: 5 });
+  assert.equal(await audio.ready(), false);
+  assert.equal(audio.isBlocked(), true);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(audio.isBlocked(), false);
+  assert.equal(audio.likely(), true);
+});
+
+test('a click that starts the context while ready() waits is not undone', async () => {
+  const { win, made } = fakeWin({ resume: 'hang' });
+  const audio = createAudio({ win, timeoutMs: 5 });
+  const pending = audio.ready();
+  audio.unlock();
+  assert.equal(await pending, false, 'still not running when ready() stopped waiting');
+  made[0].state = 'running'; // the click's start took effect a moment later
+  assert.equal(audio.isBlocked(), false);
+  assert.equal(audio.likely(), true);
+});
+
+test('a closed context is replaced, not reused', async () => {
+  const { win, made } = fakeWin({ state: 'running' });
+  const audio = createAudio({ win, timeoutMs: 5 });
+  assert.equal(await audio.ready(), true);
+  made[0].state = 'closed';
+  assert.equal(audio.play(), true);
+  assert.equal(made.length, 2);
 });
