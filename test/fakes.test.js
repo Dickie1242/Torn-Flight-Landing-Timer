@@ -28,6 +28,19 @@ test('fakeLocks hands a held lock to nobody else', async () => {
   assert.equal(await locks.request('x', { ifAvailable: true }, (lock) => lock && lock.name), 'x');
 });
 
+test('fakeLocks refuses a request without ifAvailable, as a real browser would queue it', async () => {
+  const locks = fakeLocks();
+  await assert.rejects(locks.request('x', {}, () => {}), /ifAvailable/);
+  await assert.rejects(locks.request('x', undefined, () => {}), /ifAvailable/);
+});
+
+test('fakeClock stops a timer that keeps rescheduling itself instead of hanging', () => {
+  const clock = fakeClock(0);
+  const again = () => clock.setTimeout(again, 0);
+  again();
+  assert.throws(() => clock.tick(10), /too many timers/);
+});
+
 test('memoryArea stores strings like localStorage', () => {
   const area = memoryArea({ a: '1' });
   assert.equal(area.getItem('a'), '1');

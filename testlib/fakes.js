@@ -8,6 +8,9 @@ export const MIN = 60 * 1000;
 /** 2026-10-02 12:00:00 UTC: where every test clock starts. */
 export const T0 = Date.UTC(2026, 9, 2, 12, 0, 0);
 
+/** More fires than this in one tick() means a timer keeps rescheduling itself. */
+const MAX_FIRES_PER_TICK = 100_000;
+
 /**
  * A clock with the same shape as src/core/clock.js's realClock that only moves
  * when tick() is called. Timers fire in time order; intervals repeat.
@@ -36,6 +39,7 @@ export function fakeClock(start = T0) {
     /** Moves time forward by `ms`, running every timer that falls due, earliest first. */
     tick(ms) {
       const end = current + ms;
+      let fires = 0;
       for (;;) {
         let dueId = null;
         let due = null;
@@ -46,6 +50,10 @@ export function fakeClock(start = T0) {
           }
         }
         if (due === null) break;
+        fires += 1;
+        if (fires > MAX_FIRES_PER_TICK) {
+          throw new Error('fakeClock: too many timers fired in one tick; a timer keeps rescheduling itself');
+        }
         current = due.at;
         if (due.every === null) timers.delete(dueId);
         else due.at += due.every;
@@ -76,6 +84,12 @@ export function fakeLocks() {
   return {
     held,
     async request(name, options, callback) {
+      // Only the slice Landing Timer uses. Without ifAvailable the real API
+      // queues the request instead of handing back null, so fail loudly rather
+      // than quietly behave unlike a browser.
+      if (!options || options.ifAvailable !== true) {
+        throw new Error('fakeLocks only supports request(name, { ifAvailable: true }, callback)');
+      }
       if (held.has(name)) return callback(null);
       held.add(name);
       try {
