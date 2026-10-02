@@ -131,6 +131,7 @@ export function createAlarm({
     // Only audible rings, and this tab has found it cannot play: wait for a click.
     if (!anySilent && audio.isBlocked()) return;
     claiming = true;
+    let failed = false;
     let attempt;
     try {
       attempt = Promise.resolve(claim());
@@ -139,6 +140,7 @@ export function createAlarm({
     }
     attempt
       .catch((err) => {
+        failed = true;
         warnOnce('alarm.ring', 'could not ring a timer:', err);
         // A lock API that refuses outright (a sandboxed frame, say): ring without it.
         if (err && (err.name === 'SecurityError' || err.name === 'NotSupportedError')) {
@@ -150,7 +152,10 @@ export function createAlarm({
         claiming = false;
         // A timer that came due while this tab was busy ringing: look again now,
         // rather than at the next 1 s check, which a hidden tab may run late.
-        if (started && !retryPending && waiting().some((t) => t.ringAt <= clock.now())) clock.setTimeout(tick, 0);
+        // Not after a failure, though: that would retry in a tight loop.
+        if (!failed && started && !retryPending && waiting().some((t) => t.ringAt <= clock.now())) {
+          clock.setTimeout(tick, 0);
+        }
       });
   }
 

@@ -301,3 +301,28 @@ test('the click on Start lets sound start, even though the timer did not exist w
   t.win.dispatchEvent(new Event('click'));
   assert.equal(t.audio.unlocks, 1);
 });
+
+test('a ring that keeps failing retries once a second, not in a tight loop', async () => {
+  resetWarnOnce();
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer());
+  let requests = 0;
+  const locks = {
+    request: () => {
+      requests += 1;
+      return Promise.reject(new Error('broken'));
+    },
+  };
+  const warn = captureConsole('warn');
+  try {
+    tab({ area, clock, locks });
+    clock.tick(25 * MIN);
+    await flush();
+    requests = 0;
+    await run(clock, 3000, 100);
+  } finally {
+    warn.restore();
+  }
+  assert.ok(requests <= 4, `${requests} attempts in 3 s`);
+});
