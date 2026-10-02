@@ -266,3 +266,19 @@ test('nonsense times and over-long ids are refused; long names are trimmed', () 
   assert.equal(sanitizeTimer(makeTimer({ id: 'name:Ghost' })).id, 'name:Ghost');
   assert.equal(sanitizeTimer(makeTimer({ name: 'n'.repeat(100) })).name.length, 64);
 });
+
+test('when saving fails, the tab keeps its own changes instead of re-reading them away', () => {
+  resetWarnOnce();
+  const area = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); } };
+  const storage = createStorage({ area, target: null, clock: fakeClock(T0) });
+  const warn = captureConsole('warn');
+  try {
+    storage.addTimer(makeTimer());
+    storage.setSetting('bufferMin', 3);
+  } finally {
+    warn.restore();
+  }
+  assert.equal(storage.getTimers().length, 1, 'the timer just started is still here');
+  assert.equal(storage.getSetting('bufferMin'), 3);
+  assert.equal(warn.calls.length, 1, 'one warning, not one per write');
+});

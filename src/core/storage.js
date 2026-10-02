@@ -111,6 +111,8 @@ function parseState(text) {
 export function createStorage({ area = globalThis.localStorage, target = globalThis.window, clock = realClock } = {}) {
   let state = emptyState();
   const listeners = new Set();
+  /** The last write failed: memory holds changes storage does not. */
+  let unsaved = false;
 
   function read() {
     try {
@@ -124,8 +126,10 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
   function write() {
     try {
       if (area) area.setItem(STORAGE_KEY, JSON.stringify(state));
+      unsaved = !area;
     } catch (err) {
       // Quota errors repeat on every write; warn once and keep the in-memory state.
+      unsaved = true;
       warnOnce('storage.write', 'could not save timers:', err);
     }
   }
@@ -151,9 +155,11 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
    * another tab may have written since our last storage event, and writing our
    * stale copy back would undo its change (a timer it just added, a ring it
    * just claimed). `apply` returns whether it changed anything.
+   * While writes are failing it keeps working from memory instead.
    */
   function update(apply) {
-    read();
+    // While writes fail, storage is behind us: re-reading would drop our own change.
+    if (!unsaved) read();
     const changed = apply();
     if (changed) commit();
     return changed;
