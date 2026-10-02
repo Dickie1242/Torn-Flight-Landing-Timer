@@ -1399,6 +1399,12 @@ git add src/core/storage.js test/storage.test.js
 git commit -m "feat: timer and settings storage, shared across tabs" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
+> **Amended after code review.** The code above was built as written, then changed in a follow-up commit. The committed `src/core/storage.js` and `test/storage.test.js` are authoritative.
+> - **Re-read before writing:** every mutation re-reads storage first (`update()`), so a tab with a stale copy can no longer write it back over another tab's new timer or claimed ring. While writes are failing (storage full) it works from memory instead, so the tab keeps its own changes.
+> - **Back/forward cache:** a page restored from it re-reads storage (`pageshow` with `persisted`).
+> - **Impossible times:** `markRung` refuses a non-time. `sanitizeTimer` refuses a timer whose start, ring and landing times are out of order, whose flight is longer than 24 h, or whose id is over-long, and it trims names to 64 characters.
+> - **One lock:** the alarm (Task 11) claims rings under one lock for every timer.
+
 ---
 
 ### Task 6: Reading the profile
@@ -2178,7 +2184,8 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     const plan = planTimer({ destination, plane, bufferMin, now: clock.now() });
     if (!plan) return;
     storage.addTimer({
-      id: status.id || `name:${status.name || 'unknown'}`,
+      // Storage refuses ids over 80 characters; Torn names are far shorter, but a misread one must not be.
+      id: status.id || `name:${(status.name || 'unknown').slice(0, 64)}`,
       name: status.name || (status.id ? `#${status.id}` : 'Unknown player'),
       destination,
       plane,
@@ -3200,7 +3207,12 @@ import { safe, warnOnce } from './log.js';
 /** A timer found this long past its ring time (computer asleep, browser closed) rings silently. */
 export const LATE_LIMIT_MS = 2 * 60 * 1000;
 
-/** Web Locks name prefix; one lock per timer, shared by every Torn tab. */
+/**
+ * The Web Lock every Torn tab claims a ring under. It is one lock for every
+ * timer, so claims run one at a time: each storage write saves the whole store,
+ * and two tabs marking different timers at the same moment could otherwise undo
+ * each other's mark.
+ */
 export const LOCK_NAME = 'landingtimer:ring';
 
 /**
@@ -3274,7 +3286,7 @@ export function createAlarm({
     storage.reload();
     const current = storage.getTimer(timer.id);
     if (!current || current.rungAt != null || current.ringAt !== timer.ringAt) return;
-    storage.markRung(timer.id, clock.now());
+    if (!storage.markRung(timer.id, clock.now())) return;
     if (audible) safePlay();
     if (holdMs > 0) await new Promise((resolve) => clock.setTimeout(resolve, holdMs));
   }
@@ -3286,7 +3298,7 @@ export function createAlarm({
     if (audible && !canPlay()) return;
     claiming.add(timer.id);
     const run = locks && typeof locks.request === 'function'
-      ? locks.request(`${LOCK_NAME}:${timer.id}`, { ifAvailable: true }, (lock) => (lock ? ring(timer, audible) : undefined))
+      ? locks.request(LOCK_NAME, { ifAvailable: true }, (lock) => (lock ? ring(timer, audible) : undefined))
       : ring(timer, audible);
     Promise.resolve(run)
       .catch((err) => warnOnce('alarm.ring', 'could not ring a timer:', err))
