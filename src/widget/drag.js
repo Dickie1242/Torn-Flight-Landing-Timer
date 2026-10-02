@@ -87,6 +87,9 @@ export function attachDrag({ handle, element, win, getPos, setPos }) {
     if (moved) {
       setPos(pos);
       place(pos);
+    } else {
+      // apply() was ignored while the button was down: catch up now.
+      place(getPos());
     }
   }
 

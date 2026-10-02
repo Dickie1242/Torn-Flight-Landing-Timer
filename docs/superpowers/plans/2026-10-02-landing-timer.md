@@ -3060,6 +3060,7 @@ git commit -m "feat: floating timer box with countdown, landing states and mute"
 > - **Clock checks:** it checks the clock every `TICK_MS` (250 ms) while the page is visible, and catches up on `visibilitychange`.
 > - **Re-renders:** nested re-renders from `prune()` are skipped.
 > - **Labels:** each ✕ is labelled with the player's name, and the sound button is labelled "Chime".
+> - **Translation:** the box is `translate="no"`, and each cell puts its own text node back if something replaced it, so a page translator can't freeze the countdown.
 > - **Stylesheet (Task 12):** a name with no profile link isn't styled as a link.
 
 ---

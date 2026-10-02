@@ -37,10 +37,13 @@ export function rowTitle(timer) {
 }
 
 /**
- * Writes a text node only when its text changed. That is a characterData
- * record, which the childList observers on Torn's page (ours included) ignore.
+ * Writes a cell's text through its own Text node, only when the text changed.
+ * That is a characterData record, which the childList observers on Torn's page
+ * (ours included) ignore. If something replaced the node (a page translator
+ * swaps text nodes for its own elements), the node is put back first.
  */
-function setData(node, text) {
+function setCell(cell, node, text) {
+  if (node.parentNode !== cell) cell.replaceChildren(node);
   if (node.data !== text) node.data = text;
 }
 
@@ -82,12 +85,13 @@ export function createWidget({ doc = globalThis.document, storage, clock = realC
     sound,
   ]);
   const list = el(doc, 'div', { className: `${WIDGET_CLASS}__list` });
-  const root = el(doc, 'div', { className: WIDGET_CLASS, attrs: { hidden: true } }, [bar, list]);
+  // translate="no": a page translator would otherwise swap the live countdown's text.
+  const root = el(doc, 'div', { className: WIDGET_CLASS, attrs: { hidden: true, translate: 'no' } }, [bar, list]);
 
   function onSoundClick() {
     // The press that came with this click is what lets the tab play sound:
     // a click on the "click to allow" hint is that permission, not a mute.
-    if (shownBlocked) {
+    if (shownBlocked && canPlay()) {
       forced();
       return;
     }
@@ -114,14 +118,14 @@ export function createWidget({ doc = globalThis.document, storage, clock = realC
       },
     });
     const row = el(doc, 'div', { className: ROW_CLASS, attrs: { 'data-id': id } }, [name, place, time, remove]);
-    return { row, name, remove, nameText, whereText, timeText };
+    return { row, name, place, time, remove, nameText, whereText, timeText };
   }
 
   function renderSound() {
     const on = !!storage.getSetting('sound');
     const blocked = on && !canPlay();
     shownBlocked = blocked;
-    setData(soundText, on && !blocked ? SOUND_ON : SOUND_OFF);
+    setCell(sound, soundText, on && !blocked ? SOUND_ON : SOUND_OFF);
     let title = on ? 'Chime on: click to mute' : 'Chime off: click to turn it on';
     if (blocked) title = SOUND_BLOCKED_TITLE;
     setAttr(sound, 'title', title);
@@ -129,11 +133,11 @@ export function createWidget({ doc = globalThis.document, storage, clock = realC
   }
 
   function renderRow(parts, timer, state) {
-    setData(parts.nameText, timer.name);
+    setCell(parts.name, parts.nameText, timer.name);
     if (/^\d+$/.test(timer.id)) setAttr(parts.name, 'href', `/profiles.php?XID=${timer.id}`);
     else if (parts.name.hasAttribute('href')) parts.name.removeAttribute('href');
-    setData(parts.whereText, placeText(timer));
-    setData(parts.timeText, state.text);
+    setCell(parts.place, parts.whereText, placeText(timer));
+    setCell(parts.time, parts.timeText, state.text);
     setAttr(parts.row, 'title', rowTitle(timer));
     setAttr(parts.remove, 'aria-label', `Remove timer for ${timer.name}`);
     parts.row.classList.toggle(ROW_DUE_CLASS, state.due);
@@ -168,11 +172,13 @@ export function createWidget({ doc = globalThis.document, storage, clock = realC
           parts = buildRow(timer.id);
           rows.set(timer.id, parts);
         }
-        renderRow(parts, timer, rowState(timer, now));
+        const state = rowState(timer, now);
+        renderRow(parts, timer, state);
         let phase = 2;
         if (now < timer.ringAt) phase = 0;
         else if (now < timer.landingAt) phase = 1;
-        shape.push(`${timer.id}:${phase}`);
+        // A longer time text ("+9:59" → "+10:00") can widen the box.
+        shape.push(`${timer.id}:${phase}:${state.text.length}`);
         // Move a row only when it is out of place, so a hovered row keeps its tooltip.
         if (list.children[index] !== parts.row) list.insertBefore(parts.row, list.children[index] || null);
       });
@@ -189,6 +195,10 @@ export function createWidget({ doc = globalThis.document, storage, clock = realC
   const ticked = safe('widget.tick', () => {
     if (!doc.hidden) render(false);
   });
+  // Catch up when the page is shown again; nothing to do as it is hidden.
+  const onVisibility = () => {
+    if (!doc.hidden) forced();
+  };
 
   function start() {
     if (interval !== null) return;
@@ -202,7 +212,7 @@ export function createWidget({ doc = globalThis.document, storage, clock = realC
     });
     unsubscribe = storage.subscribe(forced);
     interval = clock.setInterval(ticked, TICK_MS);
-    doc.addEventListener('visibilitychange', forced);
+    doc.addEventListener('visibilitychange', onVisibility);
     forced();
   }
 
@@ -211,7 +221,7 @@ export function createWidget({ doc = globalThis.document, storage, clock = realC
     interval = null;
     if (unsubscribe) unsubscribe();
     unsubscribe = null;
-    doc.removeEventListener('visibilitychange', forced);
+    doc.removeEventListener('visibilitychange', onVisibility);
     if (drag) drag.destroy();
     drag = null;
     root.remove();

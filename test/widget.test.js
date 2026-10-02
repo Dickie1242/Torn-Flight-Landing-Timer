@@ -204,3 +204,22 @@ test('the remove buttons say whose timer they remove', () => {
   assert.equal(w.part(w.rows()[0], 'remove').getAttribute('aria-label'), 'Remove timer for SomeName');
   assert.equal(w.sound().getAttribute('aria-label'), 'Chime');
 });
+
+test('a translator swapping a cell\'s text does not freeze the countdown', () => {
+  const w = setup();
+  w.storage.addTimer(makeTimer());
+  assert.equal(w.root.getAttribute('translate'), 'no', 'translators are asked to leave the box alone');
+  const time = w.part(w.rows()[0], 'time');
+  const font = w.doc.createElement('font');
+  font.textContent = 'ATTERRISSAGE';
+  time.replaceChildren(font);
+  w.clock.tick(1000);
+  assert.equal(time.textContent, '24:59');
+});
+
+test('if a click on the hint did not unblock the tab, the button still mutes', () => {
+  const w = setup({ canPlay: () => false });
+  w.storage.addTimer(makeTimer());
+  w.sound().click();
+  assert.equal(w.storage.getSetting('sound'), false);
+});

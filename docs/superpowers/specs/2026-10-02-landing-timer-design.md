@@ -196,8 +196,11 @@ It is on every Torn page and hidden while there are no timers.
   after `landingAt`.
 - **One timer per player:** a second Start on the same player replaces that
   player's timer.
-- **Ticking:** the display ticks once a second while visible. Background tabs
-  may tick slower, which only affects the display.
+- **Ticking:** while the page is visible, the box checks the clock four times
+  a second and rewrites only the text that changed. A hidden tab doesn't tick
+  at all and catches up when shown. With no timers the box does nothing. The
+  box is marked `translate="no"` so a page translator leaves the countdown
+  alone.
 - **Moving the box:** drag it by its title bar. The position is saved
   (`settings.widgetPos`) and kept on screen when the window shrinks. It
   starts at top-right, 16 px from the right edge and 120 px down. Its z-index

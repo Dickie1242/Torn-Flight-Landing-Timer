@@ -190,3 +190,14 @@ test('a pen lifted where we could not hear it ends the drag like a mouse', () =>
   assert.equal(element.style.left, '100px');
   assert.deepEqual(saves, [{ x: 100, y: 200 }]);
 });
+
+test('a press that does not move still leaves the box placed for the window it is in', () => {
+  const { win, doc, element, saves } = setup({ x: 700, y: 100 });
+  firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130 });
+  Object.defineProperty(win, 'innerWidth', { value: 800, configurable: true });
+  win.dispatchEvent(new win.Event('resize'));
+  assert.equal(element.style.left, '700px', 'ignored while the button is down');
+  firePointer(doc.body, 'pointerup', { clientX: 710, clientY: 130 });
+  assert.equal(element.style.left, '540px');
+  assert.deepEqual(saves, []);
+});
