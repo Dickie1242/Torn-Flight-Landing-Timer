@@ -18,6 +18,11 @@ const EDGE = 8;
 /** Space between the panel and its button, px. */
 const OFFSET = 6;
 
+/** Writes text only when it changed, so a live region is not re-announced. */
+function setText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
+
 /**
  * The timer a Start press would create, or null until a destination and a
  * plane are chosen. It rings `bufferMin` minutes before the estimated landing,
@@ -70,7 +75,8 @@ function planeTag(status, planeKey) {
 
 /**
  * Where the panel goes: under its button, or above it when there is no room
- * below, and always inside the window.
+ * below. It stays inside the window while its button is on screen, and
+ * follows the button when the page scrolls it away.
  */
 export function panelPosition(anchorRect, size, view) {
   const left = Math.min(Math.max(EDGE, anchorRect.left), Math.max(EDGE, view.width - size.width - EDGE));
@@ -123,20 +129,29 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     const plan = planTimer({ destination, plane, bufferMin, now });
     parts.start.disabled = !plan;
     if (!plan) {
-      parts.summary.textContent = 'Pick a destination and a plane.';
-      parts.variance.textContent = '';
+      setText(parts.summary, 'Pick a destination and a plane.');
+      setText(parts.variance, '');
       parts.variance.classList.remove(VARIANCE_WARN_CLASS);
+      position();
       return;
     }
     const wait = plan.ringAt - now;
-    parts.summary.textContent = wait > 0
+    setText(parts.summary, wait > 0
       ? `Rings in ${formatMinutes(wait / MINUTE)} (${formatClock(plan.ringAt)})`
-      : `Rings now (${formatClock(plan.ringAt)})`;
+      : `Rings now (${formatClock(plan.ringAt)})`);
     const spread = varianceMinutes(plan.minutes);
     const beyondBuffer = spread > bufferMin;
-    parts.variance.textContent = `Flights vary up to ~3% (${spread < 1 ? 'under 1 min' : `about ${spread} min`} on this one)`
-      + (beyondBuffer ? ': more than your buffer' : '');
+    setText(parts.variance, `Flights vary up to ~3% (${spread < 1 ? 'under 1 min' : `about ${spread} min`} on this one)`
+      + (beyondBuffer ? ': more than your buffer' : ''));
     parts.variance.classList.toggle(VARIANCE_WARN_CLASS, beyondBuffer);
+    position();
+  }
+
+  /** The player changed something: an old save error no longer applies. */
+  function edited() {
+    if (!parts) return;
+    parts.error.textContent = '';
+    update();
   }
 
   /** Once the player leaves the box, show the buffer that is actually used. */
@@ -163,7 +178,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     });
     if (!saved) {
       // Never lose a timer quietly: stay open so the player knows.
-      parts.summary.textContent = 'Could not save this timer.';
+      parts.error.textContent = 'Could not save this timer.';
       return;
     }
     storage.setSetting('bufferMin', bufferMin);
@@ -173,7 +188,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
   function build() {
     const seen = seenPlane(status);
     const pick = seen ? seen.pick : null;
-    const select = el(doc, 'select', { attrs: { name: 'destination' }, on: { change: update } }, [
+    const select = el(doc, 'select', { attrs: { name: 'destination' }, on: { change: edited } }, [
       el(doc, 'option', { text: 'Pick a country', attrs: { value: '' } }),
       ...DESTINATIONS.map((d) => el(doc, 'option', { text: d.name, attrs: { value: d.key } })),
     ]);
@@ -184,7 +199,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     const planeRows = PLANES.map((plane) => {
       const radio = el(doc, 'input', {
         attrs: { type: 'radio', name: 'landingtimer-plane', value: plane.key },
-        on: { change: update },
+        on: { change: edited },
       });
       radio.checked = plane.key === pick;
       radios.push(radio);
@@ -199,16 +214,17 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
 
     const buffer = el(doc, 'input', {
       attrs: { type: 'number', name: 'buffer', min: BUFFER.min, max: BUFFER.max, step: 1 },
-      on: { input: update, change: tidyBuffer },
+      on: { input: edited, change: tidyBuffer },
     });
     buffer.value = String(storage.getSetting('bufferMin'));
 
     const summary = el(doc, 'div', { className: `${PANEL_CLASS}__summary`, attrs: { 'aria-live': 'polite' } });
+    const error = el(doc, 'div', { className: `${PANEL_CLASS}__error`, attrs: { role: 'alert' } });
     const variance = el(doc, 'div', { className: `${PANEL_CLASS}__variance` });
     const start = el(doc, 'button', { text: 'Start', attrs: { type: 'button', 'data-action': 'start' }, on: { click: startTimer } });
     const cancel = el(doc, 'button', { text: 'Cancel', attrs: { type: 'button', 'data-action': 'cancel' }, on: { click: () => close() } });
 
-    parts = { select, radios, minutes, buffer, summary, variance, start };
+    parts = { select, radios, minutes, buffer, summary, error, variance, start };
 
     return el(doc, 'div', { className: PANEL_CLASS, attrs: { role: 'dialog', 'aria-label': 'Landing timer' } }, [
       el(doc, 'div', { className: `${PANEL_CLASS}__title` }, [
@@ -221,6 +237,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
       el(doc, 'div', { className: `${PANEL_CLASS}__planes`, attrs: { role: 'radiogroup', 'aria-label': 'Plane' } }, planeRows),
       el(doc, 'label', { className: `${PANEL_CLASS}__row` }, ['Ring ', buffer, ' min early']),
       summary,
+      error,
       variance,
       el(doc, 'div', { className: `${PANEL_CLASS}__actions` }, [cancel, start]),
     ]);
@@ -236,7 +253,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
   }
 
   function position() {
-    if (!root) return;
+    if (!root || !anchor.isConnected) return;
     const size = { width: root.offsetWidth || 320, height: root.offsetHeight || 0 };
     const { left, top } = panelPosition(anchor.getBoundingClientRect(), size, viewport());
     root.style.left = `${left}px`;
@@ -250,9 +267,12 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     else parts.start.focus();
   }
 
-  function close() {
-    // Hand the keyboard back to the button only if it was in the panel.
-    const returnFocus = root && anchor && root.contains(doc.activeElement) ? anchor : null;
+  /**
+   * Closes the panel. The keyboard goes back to the button when it was in the
+   * panel, unless the player pressed somewhere else: they are moving on.
+   */
+  function close({ restoreFocus = true } = {}) {
+    const returnFocus = restoreFocus && root && anchor && root.contains(doc.activeElement) ? anchor : null;
     for (const off of cleanup) off();
     cleanup = [];
     if (root) root.remove();
@@ -260,7 +280,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     parts = null;
     anchor = null;
     status = null;
-    if (returnFocus) returnFocus.focus();
+    if (returnFocus) returnFocus.focus({ preventScroll: true });
   }
 
   function open(anchorElement, profileStatus) {
@@ -270,13 +290,12 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     root = build();
     doc.body.append(root);
     update();
-    position();
     focusFirst();
     listen(doc, 'keydown', (event) => {
       if (event.key === 'Escape') close();
     }, true);
     listen(doc, 'pointerdown', (event) => {
-      if (root && !root.contains(event.target) && !anchor.contains(event.target)) close();
+      if (root && !root.contains(event.target) && !anchor.contains(event.target)) close({ restoreFocus: false });
     }, true);
     listen(win, 'resize', position);
     listen(doc, 'scroll', position, true);

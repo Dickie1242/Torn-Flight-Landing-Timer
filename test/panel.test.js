@@ -244,13 +244,19 @@ test('the keyboard starts on the first thing left to do and returns to the butto
   assert.equal(noPlane.doc.activeElement, noPlane.radio('standard'), 'country known: the planes');
 });
 
-test('a timer storage refuses keeps the panel open and says so', () => {
+test('a timer storage refuses keeps the panel open and says so until the player changes something', () => {
   const p = setup();
   p.storage.addTimer = () => null;
   p.start().click();
+  const error = () => p.q(`.${PANEL_CLASS}__error`).textContent;
   assert.equal(p.panel.isOpen(), true);
-  assert.equal(p.summary(), 'Could not save this timer.');
+  assert.equal(error(), 'Could not save this timer.');
+  assert.equal(p.q(`.${PANEL_CLASS}__error`).getAttribute('role'), 'alert');
+  p.clock.tick(15 * 1000);
+  assert.equal(error(), 'Could not save this timer.', 'the refresh leaves it alone');
   assert.equal(p.storage.getSetting('bufferMin'), 2, 'nothing is saved either');
+  choose(p.win, p.buffer(), '3');
+  assert.equal(error(), '', 'gone once the player changes something');
 });
 
 test('an unknown plane word is treated as no plane, not a crash', () => {
@@ -280,4 +286,27 @@ test('closing removes every listener and timer the panel added', () => {
   panel.close();
   assert.equal(live, 0);
   assert.equal(clock.pending(), 0, 'the refresh interval is cleared too');
+});
+
+test('a press outside closes the panel without pulling the keyboard back to the button', () => {
+  const p = setup();
+  assert.equal(p.doc.activeElement, p.start());
+  p.doc.getElementById('away').dispatchEvent(new p.win.MouseEvent('pointerdown', { bubbles: true }));
+  assert.equal(p.panel.isOpen(), false);
+  assert.notEqual(p.doc.activeElement, p.anchor);
+});
+
+test('the panel stays where it is while its button is detached', () => {
+  const p = setup();
+  const before = p.root.style.top;
+  p.anchor.remove();
+  p.doc.dispatchEvent(new p.win.Event('scroll'));
+  assert.equal(p.root.style.top, before);
+});
+
+test('the summary is rewritten only when its text changes', () => {
+  const p = setup();
+  const node = p.q(`.${PANEL_CLASS}__summary`).firstChild;
+  p.clock.tick(15 * 1000);
+  assert.equal(p.q(`.${PANEL_CLASS}__summary`).firstChild, node, 'same text, same text node: nothing re-announced');
 });
