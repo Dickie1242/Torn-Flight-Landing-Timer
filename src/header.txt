@@ -1,0 +1,10 @@
+// ==UserScript==
+// @name         Landing Timer
+// @namespace    landingtimer.torn
+// @version      1.0.0
+// @description  A landing countdown on Torn profiles: reads the destination and plane from the profile you are viewing, shows every flight time, and chimes a few minutes before they land. Makes no network requests.
+// @license      MIT
+// @match        https://www.torn.com/*
+// @run-at       document-idle
+// @grant        none
+// ==/UserScript==

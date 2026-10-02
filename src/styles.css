@@ -1,0 +1,5 @@
+/* Landing Timer: the whole stylesheet, injected once at boot. */
+
+.landingtimer-widget[hidden] {
+  display: none !important;
+}
