@@ -7,7 +7,7 @@ import { createAudio } from '../src/core/audio.js';
  * when asked to start: 'start', 'late' (starts 20 ms later), 'reject' (WebKit
  * outside a gesture), or 'hang' (Chrome holding it back until a gesture).
  */
-function fakeWin({ state = 'suspended', resume = 'start', activated = false } = {}) {
+function fakeWin({ state = 'suspended', resume = 'start' } = {}) {
   const made = [];
   class FakeContext {
     constructor() {
@@ -45,7 +45,6 @@ function fakeWin({ state = 'suspended', resume = 'start', activated = false } = 
   const win = {
     AudioContext: FakeContext,
     setTimeout: (fn, ms) => setTimeout(fn, ms),
-    navigator: { userActivation: { hasBeenActive: activated } },
   };
   return { win, made };
 }
@@ -84,7 +83,6 @@ test('a click unblocks the tab and asks the context to start', async () => {
   const audio = createAudio({ win, timeoutMs: 5 });
   await audio.ready();
   assert.equal(audio.isBlocked(), true);
-  win.navigator.userActivation.hasBeenActive = true;
   audio.unlock();
   assert.equal(audio.isBlocked(), false);
   assert.equal(audio.likely(), true);
@@ -92,14 +90,14 @@ test('a click unblocks the tab and asks the context to start', async () => {
 });
 
 test('likely() is yes until a check finds the tab blocked, and yes again after a click', async () => {
-  const { win } = fakeWin({ resume: 'hang', activated: false });
+  const { win } = fakeWin({ resume: 'hang' });
   const audio = createAudio({ win, timeoutMs: 5 });
   assert.equal(audio.likely(), true, 'nothing known against it: no false alarm after every page load');
   await audio.ready();
   assert.equal(audio.likely(), false);
   audio.unlock();
   assert.equal(audio.likely(), true);
-  const running = fakeWin({ state: 'running', activated: false });
+  const running = fakeWin({ state: 'running' });
   const playing = createAudio({ win: running.win, timeoutMs: 5 });
   await playing.ready();
   assert.equal(playing.likely(), true, 'the browser let it start without a click');

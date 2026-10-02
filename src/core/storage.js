@@ -287,8 +287,13 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
     target.addEventListener('pageshow', onPageShow);
   }
 
+  /** Did the last write reach localStorage? False while it is full or blocked. */
+  function saved() {
+    return !unsaved;
+  }
+
   return {
     getTimers, getTimer, addTimer, removeTimer, markRung, prune,
-    getSetting, setSetting, reload, subscribe, destroy,
+    getSetting, setSetting, reload, saved, subscribe, destroy,
   };
 }

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { fakeClock, memoryArea, T0, MIN } from '../testlib/fakes.js';
+import { fakeClock, memoryArea, captureConsole, T0, MIN } from '../testlib/fakes.js';
+import { resetWarnOnce } from '../src/core/log.js';
 import { createStorage } from '../src/core/storage.js';
 import { formatClock } from '../src/core/time.js';
 import { createPanel, planTimer, describeStatus, panelPosition, PANEL_CLASS, VARIANCE_WARN_CLASS } from '../src/profile/panel.js';
@@ -309,4 +310,32 @@ test('the summary is rewritten only when its text changes', () => {
   const node = p.q(`.${PANEL_CLASS}__summary`).firstChild;
   p.clock.tick(15 * 1000);
   assert.equal(p.q(`.${PANEL_CLASS}__summary`).firstChild, node, 'same text, same text node: nothing re-announced');
+});
+
+test('a timer the browser will not save keeps the panel open and says so', () => {
+  resetWarnOnce();
+  const dom = new JSDOM('<!doctype html><body><button id="anchor">open</button></body>', { pretendToBeVisual: true });
+  const doc = dom.window.document;
+  const clock = fakeClock(T0);
+  const area = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); } };
+  const storage = createStorage({ area, target: null, clock });
+  const panel = createPanel({ doc, storage, clock });
+  panel.open(doc.getElementById('anchor'), AIRSTRIP);
+  const warn = captureConsole('warn');
+  try {
+    panel.element.querySelector('[data-action="start"]').click();
+  } finally {
+    warn.restore();
+  }
+  assert.equal(panel.isOpen(), true);
+  assert.match(panel.element.querySelector(`.${PANEL_CLASS}__error`).textContent, /this page only/);
+  assert.equal(storage.getTimers().length, 1, 'it still runs on this page');
+});
+
+test('a timer started on someone abroad counts as their flight home', () => {
+  const p = setup({ ...AIRSTRIP, state: 'abroad', direction: null, destination: 'mexico', plane: null });
+  p.radio('standard').checked = true;
+  p.radio('standard').dispatchEvent(new p.win.Event('change', { bubbles: true }));
+  p.start().click();
+  assert.equal(p.storage.getTimers()[0].direction, 'from');
 });

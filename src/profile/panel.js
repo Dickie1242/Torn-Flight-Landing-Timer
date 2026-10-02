@@ -1,5 +1,6 @@
 import { el } from '../core/dom.js';
 import { realClock } from '../core/clock.js';
+import { safe } from '../core/log.js';
 import {
   DESTINATIONS, PLANES, PROFILE_PLANES, destinationName, minutesFor, varianceMinutes,
 } from '../core/flights.js';
@@ -123,7 +124,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     const { destination, plane, bufferMin } = chosen();
     for (const p of PLANES) {
       const minutes = minutesFor(destination, p.key);
-      parts.minutes[p.key].textContent = minutes == null ? '–' : formatMinutes(minutes);
+      setText(parts.minutes[p.key], minutes == null ? '–' : formatMinutes(minutes));
     }
     const now = clock.now();
     const plan = planTimer({ destination, plane, bufferMin, now });
@@ -166,22 +167,28 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     const { destination, plane, bufferMin } = chosen();
     const plan = planTimer({ destination, plane, bufferMin, now: clock.now() });
     if (!plan) return;
-    const saved = storage.addTimer({
+    const timer = storage.addTimer({
       // Storage refuses ids over 80 characters; Torn names are far shorter, but a misread one must not be.
       id: status.id || `name:${(status.name || 'unknown').slice(0, 64)}`,
       name: status.name || (status.id ? `#${status.id}` : 'Unknown player'),
       destination,
       plane,
-      direction: status.direction,
+      // From abroad the only flight there is goes home.
+      direction: status.direction || (status.state === 'abroad' ? 'from' : null),
       ...plan,
       rungAt: null,
     });
-    if (!saved) {
-      // Never lose a timer quietly: stay open so the player knows.
+    // Never lose a timer quietly: stay open so the player knows.
+    if (!timer) {
       parts.error.textContent = 'Could not save this timer.';
       return;
     }
     storage.setSetting('bufferMin', bufferMin);
+    if (!storage.saved()) {
+      parts.error.textContent = 'Running on this page only: the browser would not save it '
+        + '(its storage for torn.com may be full), so it will not survive leaving or reloading the page.';
+      return;
+    }
     close();
   }
 
@@ -300,7 +307,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
     listen(win, 'resize', position);
     listen(doc, 'scroll', position, true);
     // Keep "Rings in … (HH:MM)" true while the panel sits open.
-    const refresh = clock.setInterval(update, REFRESH_MS);
+    const refresh = clock.setInterval(safe('panel.refresh', update), REFRESH_MS);
     cleanup.push(() => clock.clearInterval(refresh));
   }
 

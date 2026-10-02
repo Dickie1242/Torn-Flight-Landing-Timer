@@ -197,7 +197,7 @@ export function createAlarm({
     syncInterval(timers.length > 0);
     // With a timer waiting, find out once whether this tab can play, so the
     // "click to allow" hint shows long before the ring rather than at it.
-    if (timers.length > 0 && !probed) {
+    if (timers.length > 0 && !probed && storage.getSetting('sound')) {
       probed = true;
       Promise.resolve(audio.ready()).catch(() => {});
     }
@@ -206,6 +206,8 @@ export function createAlarm({
 
   // A real click or key press is when a browser lets a page start sound.
   const onGesture = safe('alarm.gesture', () => {
+    // With the chime off there is no sound to start.
+    if (!storage.getSetting('sound')) return;
     if (waiting().length === 0) {
       // Nothing to ring, but a tab found blocked earlier must not keep its
       // "click to allow" hint: the click is the permission, timer or not.

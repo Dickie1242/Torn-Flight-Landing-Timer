@@ -355,3 +355,15 @@ test('a click clears a blocked tab even once nothing is waiting any more', async
   t.win.dispatchEvent(new Event('pointerdown'));
   assert.equal(t.audio.isBlocked(), false, 'so the hint goes, and a click on it cannot mute');
 });
+
+test('with the chime off there is no sound check and no unlock', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const t = tab({ area, clock, locks: fakeLocks() });
+  t.storage.setSetting('sound', false);
+  t.storage.addTimer(makeTimer());
+  await flush();
+  t.win.dispatchEvent(new Event('pointerdown'));
+  assert.equal(t.audio.readies, 0);
+  assert.equal(t.audio.unlocks, 0);
+});

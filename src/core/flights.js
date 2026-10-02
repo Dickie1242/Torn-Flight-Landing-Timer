@@ -52,7 +52,7 @@ export const VARIANCE = 0.03;
 export const PROFILE_PLANES = Object.freeze({
   commercial: Object.freeze({ label: 'Commercial', pick: 'standard' }),
   airstrip: Object.freeze({ label: 'Airstrip', pick: 'airstrip' }),
-  private: Object.freeze({ label: 'Private (WLT)', pick: 'private' }),
+  private: Object.freeze({ label: 'WLT private', pick: 'private' }),
 });
 
 export function isDestination(key) {

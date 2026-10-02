@@ -11,7 +11,7 @@ A userscript for [Torn City](https://www.torn.com) that puts a landing timer on 
 
 ## Rule safety
 
-**Landing Timer makes no network requests.** It sends nothing to Torn, to its API or to any other server, and it needs no API key. A test in the build fails if any network code ever appears in the finished script, and the script asks for no special permissions (`@grant none`).
+**Landing Timer makes no network requests.** It sends nothing to Torn, to its API or to any other server, and it needs no API key. A test in the build fails if any of the known ways to make a request (the network APIs, or an element or style that loads a URL) appears in the finished script, and the script asks for no special permissions (`@grant none`).
 
 What it reads:
 - It reads **only the profile page you have open**, to fill in the panel.
@@ -49,9 +49,9 @@ If someone travels disguised, the profile only says "Traveling", so you pick the
 
 - **A Torn tab must be open** for the chime. If none is, there's no chime, but the box shows where things stand as soon as you open Torn again.
 - **Sleeping tabs can't chime.** Chrome's Memory Saver and Energy Saver can put background tabs to sleep, and a sleeping tab can't chime. To be safe, keep one Torn tab where you'll see it, or turn Memory Saver off for torn.com.
-- **Sound needs a click.** Browsers only let a page make sound after you've clicked in it. If 🔊 shows as 🔇, click anywhere on that Torn page once.
+- **Sound needs a click.** Browsers only let a page make sound after you've clicked in it. If the 🔊 button shows 🔇 and you didn't mute it, the browser hasn't let that page play sound yet: click anywhere on it once.
 - **Times are estimates.** Flights vary by up to about 3%. The "Mailing Yourself Abroad" book (−25%) and the Detective Agency's delay are not shown on a profile, so your buffer has to cover them.
-- **It has only been tested in Chrome and Edge.**
+- **Built for Chrome and Edge.** Other browsers are untested.
 
 ### Flight times (one way, minutes)
 
@@ -94,7 +94,7 @@ To pick up every rebuild without pasting, create a *separate* tiny script in Tam
 // @match        https://www.torn.com/*
 // @run-at       document-idle
 // @grant        none
-// @require      file:///D:/dev/Torn%20City%20Scripts/LandingTimer/dist/landingtimer.user.js
+// @require      file:///C:/path/to/LandingTimer/dist/landingtimer.user.js
 // ==/UserScript==
 ```
 

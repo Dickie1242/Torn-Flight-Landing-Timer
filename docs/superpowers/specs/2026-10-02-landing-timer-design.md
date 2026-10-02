@@ -149,8 +149,9 @@ values are current.
 
 - **Header:** the name and ID, then the direction ("Torn → Canada" or
   "Canada → Torn") and the plane read from the profile. Disguised: "Travelling
-  disguised: pick the destination and plane." Not travelling: the status text,
-  for example "In Mexico".
+  disguised: pick the destination and plane." Abroad: "In Mexico. Not flying yet: the timer starts when you press Start."
+  At home: "Not flying right now: the timer starts when you press Start." A
+  timer started on someone abroad counts as their flight home.
 - **Destination:** a dropdown of the 11 countries, plus a blank entry.
   Pre-selected from `destination`.
 - **Plane:** four radios, each showing its minutes for the chosen destination
@@ -198,7 +199,7 @@ It is on every Torn page and hidden while there are no timers.
   player's timer.
 - **Ticking:** while the page is visible, the box checks the clock four times
   a second and rewrites only the text that changed. A hidden tab doesn't tick
-  at all and catches up when shown. With no timers the box does nothing. The
+  at all and catches up when shown. With no timers the box writes nothing. The
   box is marked `translate="no"` so a page translator leaves the countdown
   alone.
 - **Moving the box:** drag it by its title bar. The position is saved
@@ -233,9 +234,11 @@ It is on every Torn page and hidden while there are no timers.
     timer is marked rung only once this tab has actually started its audio.
   - A tab that can't play leaves the ring for one that can, or for the next
     click in this one: a click starts the audio and re-checks at once.
-  - While the tab is known to be blocked, or has never been clicked, the 🔊
-    icon shows as 🔇 with the tooltip "Click anywhere on this page to allow
-    the chime". Clicking it counts as that click; it does not mute.
+  - With a timer waiting and the chime on, the tab checks once whether it may
+    play. While it is known to be blocked, the 🔊 icon shows as 🔇 with the
+    tooltip "Click anywhere on this page to allow the chime". Any click on the
+    page clears it, and clicking the icon itself counts as that click; it does
+    not mute. With the chime off, no sound is started at all.
 - **Late:** if more than 2 minutes have passed since the estimated landing
   (computer asleep, browser closed), the timer is marked rung without a sound.
   A big buffer therefore still chimes late, up to the landing. The row still
@@ -260,7 +263,12 @@ There is one `localStorage` key, `landingtimer.v1`, holding:
 - **Sanitising:** reads are sanitised. Unknown keys are dropped, bad timers
   are discarded, numbers are clamped, and unparseable JSON starts fresh.
 - **Other tabs:** the `storage` event re-renders other tabs and reschedules
-  their chimes.
+  their chimes. A page restored from the back/forward cache re-reads.
+- **Writes:** every change re-reads storage first, so a tab with a stale copy
+  never writes it over another tab's change.
+- **Save failures:** if the browser refuses to save (storage for torn.com
+  full or blocked), the tab keeps working from memory. The panel then stays
+  open and says the timer runs on this page only.
 
 ## 7. Project layout
 
@@ -276,7 +284,8 @@ src/styles.css                  the whole stylesheet, injected once
 src/core/flights.js             flight table + variance
 src/core/selectors.js           EVERY Torn DOM lookup
 src/core/storage.js             landingtimer.v1, sanitising, cross-tab events
-src/core/alarm.js               scheduling, the exactly-once claim, Web Audio chime
+src/core/alarm.js               scheduling and the exactly-once claim
+src/core/audio.js               the synthesised chime, and whether this tab may play it
 src/core/time.js                countdown and clock formatting
 src/core/clock.js               the real clock (now + timers), injectable so tests drive time
 src/core/dom.js                 el(): builds elements, page text always as text
@@ -295,7 +304,7 @@ testlib/fakes.js                fake clock, fake Web Locks, in-memory storage, a
 
 The header has `@name Landing Timer`, `@namespace landingtimer.torn`,
 `@version 1.0.0`, `@match https://www.torn.com/*`, `@run-at document-idle`,
-`@grant none` and `@license MIT`. There are no update URLs until the player
+`@grant none`, `@noframes` and `@license MIT`. There are no update URLs until the player
 publishes a repo. The git identity is the anonymous local one ("Torn Landing
 Timer" <torn-landing-timer@noreply.invalid>), as in Chat+.
 
@@ -312,12 +321,18 @@ Timer" <torn-landing-timer@noreply.invalid>), as in Chat+.
   - Commercial maps to `standard`; a missing XID falls back to the page.
 - `storage.test.js`: defaults; sanitising junk; one timer per player
   (replace); removal; expiry 60 minutes after landing; cross-tab events.
-- `alarm.test.js` (fake clock, stubbed `navigator.locks` and `userActivation`):
-  - The chime fires once at `ringAt`, and two tabs give one chime.
-  - Sound off means no chime but `rungAt` is set.
-  - More than 2 minutes late means silent.
-  - A tab with no activation does not claim the chime.
-  - Rescheduling happens when another tab changes the timers.
+- `alarm.test.js` (fake clock, fake locks granted asynchronously, fake audio,
+  and storage that reaches other tabs late):
+  - The chime fires once at `ringAt`; two tabs give one chime; without the 5 s
+    hold, slow storage lets a second tab chime.
+  - Sound off, or more than 2 minutes after landing, means no chime but
+    `rungAt` is set; a mute from another tab counts at once.
+  - A tab that cannot play leaves the ring unmarked and rings it after a click.
+  - Timers due together ring with one chime; a busy lock is retried soon.
+  - Rescheduling happens when the timers change; nothing runs while none wait.
+- `audio.test.js` (fake AudioContext that starts, starts late, hangs or
+  refuses): `ready()`, `play()`, `unlock()` and `likely()`, a closed
+  context replaced, no Web Audio at all.
 - `panel.test.js`:
   - Pre-filled from status; blanks when unknown; Start disabled until both
     are chosen.

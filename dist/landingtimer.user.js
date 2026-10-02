@@ -292,7 +292,7 @@
   var PROFILE_PLANES = Object.freeze({
     commercial: Object.freeze({ label: "Commercial", pick: "standard" }),
     airstrip: Object.freeze({ label: "Airstrip", pick: "airstrip" }),
-    private: Object.freeze({ label: "Private (WLT)", pick: "private" })
+    private: Object.freeze({ label: "WLT private", pick: "private" })
   });
   function isDestination(key) {
     return DESTINATIONS.some((d) => d.key === key);
@@ -522,6 +522,9 @@
       target.addEventListener("storage", onStorage);
       target.addEventListener("pageshow", onPageShow);
     }
+    function saved() {
+      return !unsaved;
+    }
     return {
       getTimers,
       getTimer,
@@ -532,6 +535,7 @@
       getSetting,
       setSetting,
       reload,
+      saved,
       subscribe,
       destroy
     };
@@ -744,7 +748,7 @@
       const timers = waiting();
       reschedule(timers);
       syncInterval(timers.length > 0);
-      if (timers.length > 0 && !probed) {
+      if (timers.length > 0 && !probed && storage.getSetting("sound")) {
         probed = true;
         Promise.resolve(audio.ready()).catch(() => {
         });
@@ -752,6 +756,7 @@
       tick();
     });
     const onGesture = safe("alarm.gesture", () => {
+      if (!storage.getSetting("sound")) return;
       if (waiting().length === 0) {
         if (audio.isBlocked()) audio.unlock();
         return;
@@ -1383,7 +1388,7 @@
       const { destination, plane, bufferMin } = chosen();
       for (const p of PLANES) {
         const minutes = minutesFor(destination, p.key);
-        parts.minutes[p.key].textContent = minutes == null ? "\u2013" : formatMinutes(minutes);
+        setText(parts.minutes[p.key], minutes == null ? "\u2013" : formatMinutes(minutes));
       }
       const now = clock.now();
       const plan = planTimer({ destination, plane, bufferMin, now });
@@ -1418,21 +1423,26 @@
       const { destination, plane, bufferMin } = chosen();
       const plan = planTimer({ destination, plane, bufferMin, now: clock.now() });
       if (!plan) return;
-      const saved = storage.addTimer({
+      const timer = storage.addTimer({
         // Storage refuses ids over 80 characters; Torn names are far shorter, but a misread one must not be.
         id: status.id || `name:${(status.name || "unknown").slice(0, 64)}`,
         name: status.name || (status.id ? `#${status.id}` : "Unknown player"),
         destination,
         plane,
-        direction: status.direction,
+        // From abroad the only flight there is goes home.
+        direction: status.direction || (status.state === "abroad" ? "from" : null),
         ...plan,
         rungAt: null
       });
-      if (!saved) {
+      if (!timer) {
         parts.error.textContent = "Could not save this timer.";
         return;
       }
       storage.setSetting("bufferMin", bufferMin);
+      if (!storage.saved()) {
+        parts.error.textContent = "Running on this page only: the browser would not save it (its storage for torn.com may be full), so it will not survive leaving or reloading the page.";
+        return;
+      }
       close();
     }
     function build() {
@@ -1533,7 +1543,7 @@
       }, true);
       listen(win, "resize", position);
       listen(doc, "scroll", position, true);
-      const refresh = clock.setInterval(update, REFRESH_MS);
+      const refresh = clock.setInterval(safe("panel.refresh", update), REFRESH_MS);
       cleanup.push(() => clock.clearInterval(refresh));
     }
     return {
