@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { JSDOM, VirtualConsole } from 'jsdom';
+import { statusHtml } from '../testlib/dom.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outFile = path.join(root, 'dist', 'landingtimer.user.js');
@@ -66,4 +68,96 @@ test('rule safety: the bundle makes no network requests and asks for no permissi
   const grants = [...bundle().matchAll(/^\/\/ @grant\s+(\S+)/gm)].map((m) => m[1]);
   assert.deepEqual(grants, ['none'], 'the only grant is none');
   assert.ok(!/^\/\/ @(connect|require|resource)\b/m.test(bundle()), 'no @connect, @require or @resource');
+});
+
+test('the bundle inlines the stylesheet, the selectors and the storage key', () => {
+  const code = bundle();
+  assert.match(code, /landingtimer-widget/);
+  assert.match(code, /landingtimer-panel/);
+  assert.match(code, /\.landingtimer-panel \{[^}]*z-index: 2147483647/, 'the panel stacks above everything');
+  assert.match(code, /div\.profile-status/);
+  assert.match(code, /landingtimer\.v1/);
+  // attachDrag relies on these two rules (see its JSDoc).
+  assert.match(code, /\.landingtimer-widget \{[^}]*user-select: none/, 'dragging must not select text');
+  assert.match(code, /\.landingtimer-widget__bar \{[^}]*touch-action: none/, 'a touch drag must not scroll the page');
+});
+
+/**
+ * Runs the built userscript in a fresh jsdom page, the way Tampermonkey runs
+ * it, and waits for the page to finish loading. Anything it logs as a warning
+ * or error fails the test. (jsdom leaves a new page at readyState "loading"
+ * and fires DOMContentLoaded a moment later, so the script waits for it, as it
+ * would on Torn.)
+ */
+async function boot(url, body = '', title = 'TORN') {
+  const problems = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on('warn', (...args) => problems.push(['warn', ...args]));
+  virtualConsole.on('error', (...args) => problems.push(['error', ...args]));
+  virtualConsole.on('jsdomError', (err) => problems.push(['jsdomError', err]));
+  const dom = new JSDOM(
+    `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`,
+    { url, runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole },
+  );
+  dom.window.eval(bundle());
+  if (dom.window.document.readyState !== 'complete') {
+    await new Promise((resolve) => dom.window.addEventListener('load', resolve, { once: true }));
+  }
+  return { dom, doc: dom.window.document, problems };
+}
+
+test('smoke: on a travelling profile it shows the button, a pre-filled panel and a row after Start', async () => {
+  const status = statusHtml({
+    classes: 'profile-status m-top10 travelling to canada  ',
+    label: 'Traveling from Torn to Canada  . Type of plane: Commercial',
+    text: 'Torn to Canada ',
+  });
+  const { dom, doc, problems } = await boot(
+    'https://www.torn.com/profiles.php?XID=1234567',
+    `<h4 id="skip-to-content">SomeName's Profile</h4><div id="profileroot">${status}</div>`,
+    'SomeName [1234567] | TORN',
+  );
+  try {
+    assert.ok(doc.getElementById('landingtimer-styles'), 'styles injected');
+    const widget = doc.querySelector('.landingtimer-widget');
+    assert.ok(widget, 'timer box present');
+    assert.equal(widget.hidden, true, 'and hidden with no timers');
+    const button = doc.querySelector('.landingtimer-button');
+    assert.ok(button, 'button present');
+    assert.ok(button.classList.contains('landingtimer-button--active'), 'accented: they are flying');
+    button.click();
+    const panel = doc.querySelector('.landingtimer-panel');
+    assert.equal(panel.querySelector('select').value, 'canada');
+    assert.equal(panel.querySelector('input[type="radio"]:checked').value, 'standard');
+    panel.querySelector('[data-action="start"]').click();
+    assert.equal(doc.querySelector('.landingtimer-panel'), null, 'Start closes the panel');
+    assert.equal(widget.hidden, false);
+    assert.match(doc.querySelector('.landingtimer-row').textContent, /SomeName.*Canada.*37:00/);
+    assert.deepEqual(problems, []);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('smoke: off a profile it shows only the hidden timer box', async () => {
+  const { dom, doc, problems } = await boot('https://www.torn.com/index.php');
+  try {
+    assert.ok(doc.querySelector('.landingtimer-widget'));
+    assert.equal(doc.querySelector('.landingtimer-button'), null);
+    assert.deepEqual(problems, []);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('smoke: a second installed copy on the same page stays idle', async () => {
+  const { dom, doc, problems } = await boot('https://www.torn.com/index.php');
+  try {
+    dom.window.eval(bundle());
+    assert.equal(doc.querySelectorAll('.landingtimer-widget').length, 1);
+    assert.equal(doc.querySelectorAll('#landingtimer-styles').length, 1);
+    assert.deepEqual(problems, []);
+  } finally {
+    dom.window.close();
+  }
 });
