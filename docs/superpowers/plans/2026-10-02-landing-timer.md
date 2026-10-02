@@ -3979,6 +3979,11 @@ git add README.md LICENSE
 git commit -m "docs: README with rule safety, usage, flight table and checklist" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
+> **Amended after the final whole-branch review.** The committed README is authoritative.
+> - **README wording:** it describes the no-network test as checking the known ways to make a request, gives the 🔇 advice for a tab that isn't muted, says other browsers are untested, and uses a placeholder path in the dev loader.
+> - **Code:** a timer the browser won't save keeps the panel open with "Running on this page only…" (`storage.saved()`), and a timer started on someone abroad counts as their flight home. The plane's name is "WLT private" everywhere, and with the chime off no sound is started.
+> - **Spec:** it was brought back in line with the code.
+
 ---
 
 ### Task 14: Confirm the rest of the real markup (needs the player)
