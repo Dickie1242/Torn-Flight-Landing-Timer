@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { fakeClock, memoryArea, makeTimer, T0, MIN } from '../testlib/fakes.js';
-import { createStorage, EXPIRE_AFTER_MS } from '../src/core/storage.js';
+import { createStorage, EXPIRE_AFTER_MS, STORAGE_KEY } from '../src/core/storage.js';
 import { formatClock } from '../src/core/time.js';
 import {
   createWidget, rowState, placeText, rowTitle,
@@ -128,5 +128,79 @@ test('destroy removes the box and stops ticking', () => {
   assert.equal(w.root.isConnected, false);
   assert.equal(w.clock.pending(), 0);
   w.storage.addTimer(makeTimer());
-  assert.equal(w.rows().length, 0);
+  assert.equal(w.root.querySelectorAll(`.${ROW_CLASS}`).length, 0, 'a leaked subscription would render into the detached box');
+});
+
+test('a row reads LANDED +0:00 at exactly the landing time, and with no buffer at all', () => {
+  assert.deepEqual(rowState(makeTimer(), T0 + 27 * MIN), { due: true, text: 'LANDED +0:00' });
+  assert.deepEqual(rowState(makeTimer({ ringAt: T0 + 27 * MIN }), T0 + 27 * MIN), { due: true, text: 'LANDED +0:00' });
+  assert.deepEqual(rowState(makeTimer(), T0 + 25 * MIN - 1), { due: false, text: '0:01' });
+});
+
+test('a double-click on ✕ removes one timer, not the one that slides up after it', () => {
+  const w = setup();
+  w.storage.addTimer(makeTimer({ id: 'a', ringAt: T0 + 10 * MIN, landingAt: T0 + 12 * MIN }));
+  w.storage.addTimer(makeTimer({ id: 'b', ringAt: T0 + 20 * MIN, landingAt: T0 + 22 * MIN }));
+  const { MouseEvent } = w.doc.defaultView;
+  w.part(w.rows()[0], 'remove').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  w.part(w.rows()[0], 'remove').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }));
+  assert.deepEqual(w.storage.getTimers().map((t) => t.id), ['b']);
+});
+
+test('clicking the "click to allow" hint allows the chime instead of muting it', () => {
+  let allowed = false;
+  const w = setup({ canPlay: () => allowed });
+  w.storage.addTimer(makeTimer());
+  assert.equal(w.sound().title, SOUND_BLOCKED_TITLE);
+  allowed = true; // the press that came with this click let the tab play sound
+  w.sound().click();
+  assert.equal(w.storage.getSetting('sound'), true);
+  assert.equal(w.sound().textContent, SOUND_ON);
+  w.sound().click();
+  assert.equal(w.storage.getSetting('sound'), false, 'after that the button mutes as usual');
+});
+
+test('an idle box writes nothing, and a tick rewrites only the times that changed', () => {
+  const w = setup();
+  const observer = new w.doc.defaultView.MutationObserver(() => {});
+  observer.observe(w.doc.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  w.clock.tick(5000);
+  assert.deepEqual(observer.takeRecords(), [], 'no timers: no writes');
+  w.storage.addTimer(makeTimer());
+  w.storage.addTimer(makeTimer({ id: '42', ringAt: T0 + 40 * MIN, landingAt: T0 + 42 * MIN }));
+  observer.takeRecords();
+  w.clock.tick(1000);
+  const writes = observer.takeRecords();
+  assert.deepEqual(writes.map((r) => r.type), ['characterData', 'characterData'], 'one new time per row, nothing else');
+  observer.disconnect();
+});
+
+test('a hidden tab does not tick, and catches up when shown', () => {
+  const w = setup();
+  w.storage.addTimer(makeTimer());
+  Object.defineProperty(w.doc, 'hidden', { value: true, configurable: true });
+  w.clock.tick(60 * 1000);
+  assert.deepEqual(w.times(), ['25:00']);
+  Object.defineProperty(w.doc, 'hidden', { value: false, configurable: true });
+  w.doc.dispatchEvent(new w.doc.defaultView.Event('visibilitychange'));
+  assert.deepEqual(w.times(), ['24:00']);
+});
+
+test('a timer started in another tab shows up straight away', () => {
+  const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true });
+  const doc = dom.window.document;
+  const area = memoryArea();
+  const target = new EventTarget();
+  const clock = fakeClock(T0);
+  createWidget({ doc, storage: createStorage({ area, target, clock }), clock }).start();
+  createStorage({ area, target: null, clock }).addTimer(makeTimer());
+  target.dispatchEvent(Object.assign(new Event('storage'), { key: STORAGE_KEY }));
+  assert.equal(doc.querySelectorAll(`.${ROW_CLASS}`).length, 1);
+});
+
+test('the remove buttons say whose timer they remove', () => {
+  const w = setup();
+  w.storage.addTimer(makeTimer());
+  assert.equal(w.part(w.rows()[0], 'remove').getAttribute('aria-label'), 'Remove timer for SomeName');
+  assert.equal(w.sound().getAttribute('aria-label'), 'Chime');
 });
