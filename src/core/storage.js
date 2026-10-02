@@ -248,9 +248,9 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
     return getSetting(name);
   }
 
-  /** Re-reads storage, for when another tab may have written a moment ago. */
+  /** Re-reads storage, for when another tab may have written a moment ago. While writes fail it keeps memory, which is ahead. */
   function reload() {
-    read();
+    if (!unsaved) read();
   }
 
   function subscribe(listener) {

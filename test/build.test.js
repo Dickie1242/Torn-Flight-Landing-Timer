@@ -32,6 +32,7 @@ test('the bundle starts with the metadata block and is one IIFE', () => {
   assert.match(code, /\/\/ @namespace\s+landingtimer\.torn/);
   assert.match(code, /\/\/ @match\s+https:\/\/www\.torn\.com\/\*/);
   assert.match(code, /\/\/ @run-at\s+document-idle/);
+  assert.match(code, /\/\/ @noframes/, "not run inside Torn's frames");
   assert.match(code, /\/\/ ==\/UserScript==/);
   assert.match(code, /^\(\(\) => \{/m, 'bundle body must be an IIFE');
   assert.ok(!/^\s*import\s/m.test(code), 'no import statements survive bundling');

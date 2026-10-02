@@ -7,6 +7,7 @@
 // @match        https://www.torn.com/*
 // @run-at       document-idle
 // @grant        none
+// @noframes
 // ==/UserScript==
 (() => {
   // src/core/log.js

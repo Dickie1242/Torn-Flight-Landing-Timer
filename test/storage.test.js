@@ -282,3 +282,17 @@ test('when saving fails, the tab keeps its own changes instead of re-reading the
   assert.equal(storage.getSetting('bufferMin'), 3);
   assert.equal(warn.calls.length, 1, 'one warning, not one per write');
 });
+
+test('reload keeps a tab\'s own changes while saving fails', () => {
+  resetWarnOnce();
+  const area = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); } };
+  const storage = createStorage({ area, target: null, clock: fakeClock(T0) });
+  const warn = captureConsole('warn');
+  try {
+    storage.addTimer(makeTimer());
+    storage.reload();
+  } finally {
+    warn.restore();
+  }
+  assert.equal(storage.getTimers().length, 1);
+});

@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  fakeClock, fakeLocks, memoryArea, makeTimer, flush, T0, MIN,
+  fakeClock, fakeLocks, memoryArea, laggyAreas, makeTimer, flush, captureConsole, T0, MIN,
 } from '../testlib/fakes.js';
+import { resetWarnOnce } from '../src/core/log.js';
 import { createStorage } from '../src/core/storage.js';
-import { createAlarm, defaultCanPlay, LATE_LIMIT_MS } from '../src/core/alarm.js';
+import { createAlarm, isLate, LATE_LIMIT_MS, LOCK_NAME, RETRY_MS } from '../src/core/alarm.js';
 
 function fakeWin() {
   const win = new EventTarget();
@@ -12,20 +13,51 @@ function fakeWin() {
   return win;
 }
 
+/** Sound as a tab sees it: `allowed` says whether the browser lets this tab play. */
+function fakeAudio(clock, plays, { allowed = true } = {}) {
+  const audio = {
+    allowed,
+    blocked: false,
+    unlocks: 0,
+    async ready() {
+      audio.blocked = !audio.allowed;
+      return audio.allowed;
+    },
+    play() {
+      plays.push(clock.now());
+      return true;
+    },
+    unlock() {
+      audio.unlocks += 1;
+      audio.blocked = false;
+    },
+    isBlocked: () => audio.blocked,
+    likely: () => !audio.blocked,
+  };
+  return audio;
+}
+
 function seed(area, clock, ...timers) {
   const storage = createStorage({ area, target: null, clock });
   for (const timer of timers) storage.addTimer(timer);
 }
 
-function tab({ area, clock, locks = null, canPlay = () => true, holdMs = 0 }) {
+function tab({ area, clock, locks = null, allowed = true, holdMs = 0 }) {
   const storage = createStorage({ area, target: null, clock });
   const plays = [];
+  const audio = fakeAudio(clock, plays, { allowed });
   const win = fakeWin();
-  const alarm = createAlarm({
-    storage, win, clock, locks, canPlay, holdMs, play: () => plays.push(clock.now()),
-  });
+  const alarm = createAlarm({ storage, win, clock, locks, audio, holdMs });
   alarm.start();
-  return { storage, alarm, plays, win };
+  return { storage, alarm, plays, audio, win };
+}
+
+/** Moves time on in steps, letting promises settle between them. */
+async function run(clock, ms, step = 100) {
+  for (let done = 0; done < ms; done += step) {
+    clock.tick(Math.min(step, ms - done));
+    await flush();
+  }
 }
 
 test('it chimes once, at the ring time', async () => {
@@ -40,8 +72,7 @@ test('it chimes once, at the ring time', async () => {
   await flush();
   assert.deepEqual(t.plays, [T0 + 25 * MIN]);
   assert.equal(t.storage.getTimer('1234567').rungAt, T0 + 25 * MIN);
-  clock.tick(10_000);
-  await flush();
+  await run(clock, 10_000, 1000);
   assert.equal(t.plays.length, 1);
 });
 
@@ -57,37 +88,59 @@ test('with the sound off it stays quiet but still marks the timer rung', async (
   assert.equal(t.storage.getTimer('1234567').rungAt, T0 + 25 * MIN);
 });
 
-test('more than two minutes late it marks the timer rung silently', async () => {
+test('a mute made in another tab just before the ring is respected', async () => {
   const area = memoryArea();
   const clock = fakeClock(T0);
-  seed(area, clock, makeTimer({ startedAt: T0 - 30 * MIN, ringAt: T0 - LATE_LIMIT_MS - 1, landingAt: T0 }));
+  seed(area, clock, makeTimer());
+  const t = tab({ area, clock, locks: fakeLocks() });
+  createStorage({ area, target: null, clock }).setSetting('sound', false);
+  clock.tick(25 * MIN);
+  await flush();
+  assert.deepEqual(t.plays, [], 'this tab had not heard of the mute, but the ring reads storage afresh');
+  assert.notEqual(t.storage.getTimer('1234567').rungAt, null);
+});
+
+test('lateness is measured from the landing, not the ring', () => {
+  const timer = makeTimer({ startedAt: T0 - 40 * MIN, ringAt: T0 - 13 * MIN, landingAt: T0 - 3 * MIN });
+  assert.equal(isLate(timer, T0), true, 'landed three minutes ago');
+  const bigBuffer = makeTimer({ startedAt: T0 - 20 * MIN, ringAt: T0 - 3 * MIN, landingAt: T0 + 7 * MIN });
+  assert.equal(isLate(bigBuffer, T0), false, 'rang three minutes ago, but lands in seven');
+});
+
+test('more than two minutes after the landing it marks the timer rung silently', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const landingAt = T0 - LATE_LIMIT_MS - 1;
+  seed(area, clock, makeTimer({ startedAt: landingAt - 27 * MIN, ringAt: landingAt - 2 * MIN, landingAt }));
   const t = tab({ area, clock, locks: fakeLocks() });
   await flush();
   assert.deepEqual(t.plays, []);
   assert.equal(t.storage.getTimer('1234567').rungAt, T0);
 });
 
-test('up to two minutes late it still chimes', async () => {
+test('up to two minutes after the landing it still chimes', async () => {
   const area = memoryArea();
   const clock = fakeClock(T0);
-  seed(area, clock, makeTimer({ startedAt: T0 - 30 * MIN, ringAt: T0 - LATE_LIMIT_MS, landingAt: T0 }));
+  const landingAt = T0 - LATE_LIMIT_MS;
+  seed(area, clock, makeTimer({ startedAt: landingAt - 27 * MIN, ringAt: landingAt - 2 * MIN, landingAt }));
   const t = tab({ area, clock, locks: fakeLocks() });
   await flush();
   assert.deepEqual(t.plays, [T0]);
 });
 
-test('a tab that may not play leaves the chime until it can', async () => {
+test('a tab that cannot play leaves the ring unmarked, and rings it after a click', async () => {
   const area = memoryArea();
   const clock = fakeClock(T0);
   seed(area, clock, makeTimer());
-  let allowed = false;
-  const t = tab({ area, clock, locks: fakeLocks(), canPlay: () => allowed });
+  const t = tab({ area, clock, locks: fakeLocks(), allowed: false });
   clock.tick(25 * MIN);
   await flush();
   assert.deepEqual(t.plays, []);
   assert.equal(t.storage.getTimer('1234567').rungAt, null, 'left for a tab that can play');
-  allowed = true;
+  assert.equal(t.audio.isBlocked(), true);
+  t.audio.allowed = true;
   t.win.dispatchEvent(new Event('pointerdown'));
+  assert.equal(t.audio.unlocks, 1);
   clock.tick(0);
   await flush();
   assert.equal(t.plays.length, 1);
@@ -100,28 +153,69 @@ test('two tabs, one chime', async () => {
   seed(area, clock, makeTimer());
   const a = tab({ area, clock, locks });
   const b = tab({ area, clock, locks });
-  clock.tick(25 * MIN);
-  await flush();
-  clock.tick(5000);
-  await flush();
+  await run(clock, 25 * MIN + 10_000, 1000);
   assert.equal(a.plays.length + b.plays.length, 1);
 });
 
-test('while one tab holds the lock, the other skips, and stays quiet after', async () => {
+test('with storage that is slow to reach other tabs, holding the lock is what keeps it to one chime', async () => {
+  for (const [holdMs, chimes] of [[0, 2], [5000, 1]]) {
+    const clock = fakeClock(T0);
+    const [areaA, areaB] = laggyAreas(clock, 1500, 2);
+    seed(areaA, clock, makeTimer());
+    clock.tick(1500); // the timer reaches tab B's copy
+    const locks = fakeLocks();
+    const a = tab({ area: areaA, clock, locks, holdMs });
+    const b = tab({ area: areaB, clock, locks, holdMs });
+    await run(clock, 25 * MIN + 10_000, 100);
+    assert.equal(a.plays.length + b.plays.length, chimes, `hold ${holdMs} ms`);
+  }
+});
+
+test('timers due together ring with one chime', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer({ id: '1' }), makeTimer({ id: '2' }), makeTimer({ id: '3' }));
+  const t = tab({ area, clock, locks: fakeLocks(), holdMs: 5000 });
+  clock.tick(25 * MIN);
+  await flush();
+  assert.deepEqual(t.plays, [T0 + 25 * MIN]);
+  assert.ok(t.storage.getTimers().every((timer) => timer.rungAt === T0 + 25 * MIN));
+});
+
+test('a tab that finds the lock busy looks again soon, not at its next 1 s check', async () => {
   const area = memoryArea();
   const clock = fakeClock(T0);
   const locks = fakeLocks();
   seed(area, clock, makeTimer());
-  const a = tab({ area, clock, locks, holdMs: 5000 });
-  const b = tab({ area, clock, locks, holdMs: 5000 });
+  const t = tab({ area, clock, locks });
+  locks.held.add(LOCK_NAME); // another tab is ringing
   clock.tick(25 * MIN);
   await flush();
-  assert.equal(a.plays.length + b.plays.length, 1);
-  for (let second = 0; second < 8; second += 1) {
-    clock.tick(1000);
+  assert.deepEqual(t.plays, []);
+  locks.held.delete(LOCK_NAME);
+  clock.tick(RETRY_MS);
+  await flush();
+  assert.deepEqual(t.plays, [T0 + 25 * MIN + RETRY_MS]);
+});
+
+test('a lock API that refuses outright falls back to ringing directly', async () => {
+  resetWarnOnce();
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer());
+  const locks = { request: () => Promise.reject(Object.assign(new Error('denied'), { name: 'SecurityError' })) };
+  const warn = captureConsole('warn');
+  try {
+    const t = tab({ area, clock, locks });
+    clock.tick(25 * MIN);
     await flush();
+    clock.tick(0);
+    await flush();
+    assert.equal(t.plays.length, 1);
+  } finally {
+    warn.restore();
   }
-  assert.equal(a.plays.length + b.plays.length, 1);
+  assert.equal(warn.calls.length, 1);
 });
 
 test('a timer added after start is scheduled too', async () => {
@@ -150,23 +244,34 @@ test('without the Web Locks API it still chimes once', async () => {
   const clock = fakeClock(T0);
   seed(area, clock, makeTimer());
   const t = tab({ area, clock, locks: null });
-  clock.tick(26 * MIN);
-  await flush();
+  await run(clock, 26 * MIN, 1000);
   assert.equal(t.plays.length, 1);
 });
 
-test('defaultCanPlay follows userActivation, and assumes yes without it', () => {
-  assert.equal(defaultCanPlay({ userActivation: { hasBeenActive: false } }), false);
-  assert.equal(defaultCanPlay({ userActivation: { hasBeenActive: true } }), true);
-  assert.equal(defaultCanPlay({}), true);
-  assert.equal(defaultCanPlay(null), true);
-});
-
-test('destroy cancels every timer', () => {
+test('with nothing waiting there is no timer, no interval, and gestures do nothing', async () => {
   const area = memoryArea();
   const clock = fakeClock(T0);
-  seed(area, clock, makeTimer());
   const t = tab({ area, clock, locks: fakeLocks() });
+  assert.equal(clock.pending(), 0);
+  t.win.dispatchEvent(new Event('keydown'));
+  assert.equal(t.audio.unlocks, 0);
+  assert.equal(clock.pending(), 0);
+  t.storage.addTimer(makeTimer());
+  assert.equal(clock.pending(), 2, 'the ring timeout and the 1 s check');
+  clock.tick(25 * MIN);
+  await flush();
+  assert.equal(clock.pending(), 0, 'all rung: back to nothing');
+});
+
+test('destroy cancels every timer, and a check already queued does nothing', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer({ startedAt: T0 - 30 * MIN, ringAt: T0 + 1000, landingAt: T0 + 2 * MIN }));
+  const t = tab({ area, clock, locks: fakeLocks() });
+  t.win.dispatchEvent(new Event('pointerdown'));
   t.alarm.destroy();
+  clock.tick(5000);
+  await flush();
+  assert.deepEqual(t.plays, []);
   assert.equal(clock.pending(), 0);
 });

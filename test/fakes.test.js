@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fakeClock, fakeLocks, memoryArea } from '../testlib/fakes.js';
+import {
+  fakeClock, fakeLocks, memoryArea, laggyAreas,
+} from '../testlib/fakes.js';
 
 test('fakeClock runs timers in time order and repeats intervals', () => {
   const clock = fakeClock(1000);
@@ -47,4 +49,14 @@ test('memoryArea stores strings like localStorage', () => {
   assert.equal(area.getItem('b'), null);
   area.setItem('b', 2);
   assert.equal(area.getItem('b'), '2');
+});
+
+test('laggyAreas delivers a write to the other tabs only after the lag', () => {
+  const clock = fakeClock(0);
+  const [a, b] = laggyAreas(clock, 100, 2);
+  a.setItem('k', 'v');
+  assert.equal(a.getItem('k'), 'v');
+  assert.equal(b.getItem('k'), null);
+  clock.tick(100);
+  assert.equal(b.getItem('k'), 'v');
 });

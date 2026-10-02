@@ -90,6 +90,8 @@ export function fakeLocks() {
       if (!options || options.ifAvailable !== true) {
         throw new Error('fakeLocks only supports request(name, { ifAvailable: true }, callback)');
       }
+      // Real browsers grant a lock in a later task, never inside request() itself.
+      await Promise.resolve();
       if (held.has(name)) return callback(null);
       held.add(name);
       try {
@@ -99,6 +101,25 @@ export function fakeLocks() {
       }
     },
   };
+}
+
+/**
+ * localStorage as several tabs see it: each tab reads its own copy, and a write
+ * reaches the other tabs' copies `lagMs` later, as in a real browser. Returns
+ * one area per tab.
+ */
+export function laggyAreas(clock, lagMs, count) {
+  const copies = Array.from({ length: count }, () => new Map());
+  return copies.map((mine, index) => ({
+    getItem: (key) => (mine.has(key) ? mine.get(key) : null),
+    setItem: (key, value) => {
+      const text = String(value);
+      mine.set(key, text);
+      copies.forEach((other, j) => {
+        if (j !== index) clock.setTimeout(() => other.set(key, text), lagMs);
+      });
+    },
+  }));
 }
 
 /** A timer for player 1234567 flying Torn → Canada by airstrip, started at T0 with a 2-minute buffer. */
