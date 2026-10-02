@@ -156,13 +156,20 @@ values are current.
 - **Plane:** four radios, each showing its minutes for the chosen destination
   (or "–" when no destination is chosen). Pre-selected from `plane`, and the
   detected one is tagged "← from profile". When the profile says Commercial,
-  Standard is tagged and Business gets the note "or Business class".
+  Standard is tagged and Business gets the note "← also Commercial".
 - **Ring … min early:** a whole number from 0 to 30. It defaults to 2 and
   remembers the last value used (`settings.bufferMin`).
 - **Summary:** "rings in X (HH:MM)" in local time.
   `ringAt = max(now, landingAt − buffer)`, and a buffer at or above the flight
   time says "rings now".
-- **Variance line:** `round(minutes × 0.03)` minutes, or "under 1 min".
+- **Variance line:** `round(minutes × 0.03)` minutes, or "under 1 min". When
+  that is more than the buffer, the line adds ": more than your buffer" and
+  turns amber, so long flights get a bigger buffer.
+- **Placement:** the panel opens under the button, or above it when there's no
+  room below. It stays inside the window while its button is on screen, and
+  follows the button when the page scrolls. The keyboard starts on the first
+  thing left to do. Escape, Cancel and Start hand it back to the button; a
+  press elsewhere does not.
 - **Start** is disabled until both a destination and a plane are chosen. It
   saves the timer, saves the buffer and closes the panel.
 

@@ -2330,6 +2330,21 @@ git add src/core/dom.js src/profile/panel.js test/panel.test.js
 git commit -m "feat: landing timer panel with every flight time and the buffer" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
+> **Amended after code review.** The code above was built as written, then changed in a follow-up commit. The committed files are authoritative.
+> - **Position:** the panel opens under its button, or above it when there's no room below, and stays inside the window (`panelPosition`). It repositions on resize and scroll.
+> - **Keyboard:** focus goes to the first thing left to do. It returns to the button, without scrolling, on Escape, Cancel or Start, but not when the player presses outside the panel.
+> - **Save errors:** a refused save shows in its own `role="alert"` line, which the refresh never overwrites.
+> - **Re-placing:** the panel re-places itself whenever its contents change, and stays put while its button is detached.
+> - **Summary:** the summary is rewritten only when its text changes.
+> - **Ring time:** "Rings in" refreshes every 15 s.
+> - **Buffer box:** an empty box means the remembered buffer, and the box shows the value actually used.
+> - **Variance:** the line warns (`VARIANCE_WARN_CLASS`) when the variance exceeds the buffer.
+> - **Refused save:** a refused save keeps the panel open with a message.
+> - **Unknown plane words:** treated as no plane.
+> - **Escape:** caught in the capture phase.
+> - **Labels:** the planes get a radiogroup label and the summary is `aria-live`.
+> - **Stylesheet (Task 12):** gives the panel `max-height` and scrolling, and styles the warning.
+
 ---
 
 ### Task 8: The profile button
@@ -3528,6 +3543,8 @@ Expected: the stylesheet test FAILS (no `landingtimer-panel` in the bundle) and 
   position: fixed;
   z-index: 2147483647;
   width: 320px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   box-sizing: border-box;
   padding: 10px 12px;
   font: 12px/1.5 Arial, sans-serif;
@@ -3562,6 +3579,7 @@ Expected: the stylesheet test FAILS (no `landingtimer-panel` in the bundle) and 
 .landingtimer-panel__tag { color: #8bc34a; font-size: 11px; }
 .landingtimer-panel__summary { margin-top: 6px; font-weight: 600; }
 .landingtimer-panel__variance { color: #aaa; font-size: 11px; }
+.landingtimer-panel__variance--warn { color: #ffb74d; }
 .landingtimer-panel__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .landingtimer-panel__actions button {
   font: inherit;
