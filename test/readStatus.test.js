@@ -155,3 +155,19 @@ test('isProfilePage is true only on profiles.php', () => {
   assert.equal(isProfilePage({ pathname: '/index.php' }), false);
   assert.equal(isProfilePage(null), false);
 });
+
+test('sources that disagree only about the direction keep the agreed country', () => {
+  assert.deepEqual(read({
+    classes: 'profile-status m-top10 travelling from mexico',
+    label: 'Traveling from Torn to Mexico. Type of plane: Commercial',
+  }), { ...PLAYER, state: 'traveling', direction: null, destination: 'mexico', plane: 'commercial' });
+});
+
+test('sources that disagree about the plane leave it blank', () => {
+  assert.deepEqual(read({
+    classes: 'profile-status m-top10 travelling to canada airstrip',
+    label: 'Traveling from Torn to Canada. Type of plane: Private',
+  }), { ...PLAYER, state: 'traveling', direction: 'to', destination: 'canada', plane: null });
+  assert.equal(read({ classes: 'profile-status m-top10 travelling to canada airstrip private' }).plane, 'airstrip',
+    'two plane words in the classes: the classes take the first, there is no second source to disagree');
+});

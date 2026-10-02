@@ -98,26 +98,31 @@ export function parsePlaneLabel(label) {
   return { ...parseStatusText(match[1]), plane: PLANE_WORD.get(match[2].toLowerCase()) || null };
 }
 
+/** The distinct non-null values the sources give for `field`. */
+function distinct(sources, field) {
+  return [...new Set(sources.map((source) => source[field]).filter(Boolean))];
+}
+
 /**
- * Where the player is going, as one piece. Sources that disagree about the
- * country or the direction leave both blank: a wrong pre-fill is worse than a
- * blank the player fills in.
+ * Where the player is going. Sources that name different countries leave the
+ * route blank: a wrong pre-fill is worse than a blank the player fills in. A
+ * flight takes as long either way, so sources that agree on the country but
+ * not the direction keep the country and leave only the direction blank.
  */
 function pickRoute(sources) {
-  const destinations = new Set(sources.map((s) => s.destination).filter(Boolean));
-  const directions = new Set(sources.map((s) => s.direction).filter(Boolean));
-  if (destinations.size > 1 || directions.size > 1) return { direction: null, destination: null };
+  const destinations = distinct(sources, 'destination');
+  const directions = distinct(sources, 'direction');
   return {
-    direction: directions.size ? [...directions][0] : null,
-    destination: destinations.size ? [...destinations][0] : null,
+    destination: destinations.length === 1 ? destinations[0] : null,
+    direction: destinations.length <= 1 && directions.length === 1 ? directions[0] : null,
   };
 }
 
 /**
  * Everything the open profile says about where its player is going. The
- * state and the plane come from the most trusted source that has one; the
- * route comes from `pickRoute`. A field nothing could read is null. Never
- * throws on a strange page.
+ * state comes from the most trusted source that has one; the route from
+ * `pickRoute`; the plane only when every source that names one agrees. A
+ * field nothing could read is null. Never throws on a strange page.
  * @returns {ProfileStatus}
  */
 export function readStatus(doc, href) {
@@ -135,12 +140,14 @@ export function readStatus(doc, href) {
   const state = pick('state') || 'other';
   const travelling = state === 'traveling';
   const route = pickRoute(sources);
+  const planes = distinct(sources, 'plane');
   return {
     id: selectors.profileIdFromUrl(href) || identity.id,
     name: identity.name,
     state,
     direction: travelling ? route.direction : null,
     destination: (travelling || state === 'abroad') ? route.destination : null,
-    plane: travelling ? pick('plane') : null,
+    // The plane sets the timer's length: sources that disagree leave it blank.
+    plane: travelling && planes.length === 1 ? planes[0] : null,
   };
 }
