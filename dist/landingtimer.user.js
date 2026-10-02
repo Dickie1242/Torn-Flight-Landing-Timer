@@ -8,6 +8,10 @@
 // @run-at       document-idle
 // @grant        none
 // @noframes
+// @homepageURL  https://github.com/Dickie1242/Torn-Flight-Landing-Timer
+// @supportURL   https://github.com/Dickie1242/Torn-Flight-Landing-Timer/issues
+// @downloadURL  https://raw.githubusercontent.com/Dickie1242/Torn-Flight-Landing-Timer/main/dist/landingtimer.user.js
+// @updateURL    https://raw.githubusercontent.com/Dickie1242/Torn-Flight-Landing-Timer/main/dist/landingtimer.user.js
 // ==/UserScript==
 (() => {
   // src/core/selectors.js

@@ -21,14 +21,21 @@ Torn's rules allow scripts that rely on "a page that you have manually loaded an
 
 Your timers are stored in your browser (`localStorage`, key `landingtimer.v1`) and nowhere else.
 
+The one thing that does go over the network is Tampermonkey's own update check. Because of the `@updateURL` line, Tampermonkey checks this GitHub repository for new versions now and then, as it does for any script installed from a link. That is Tampermonkey, not the script, and it never involves Torn.
+
 ## Install
 
 1. Install a userscript manager, such as [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
-2. Open the Tampermonkey dashboard and click the **+** tab to create a new script.
-3. Select everything in the editor and delete it.
-4. Open `dist/landingtimer.user.js`, copy the whole file and paste it in.
-5. **File > Save** (or Ctrl+S).
-6. Open a Torn profile.
+2. Open the install link and click **Install**:
+   https://raw.githubusercontent.com/Dickie1242/Torn-Flight-Landing-Timer/main/dist/landingtimer.user.js
+   Your userscript manager checks this link for updates, so new versions arrive automatically.
+3. Open a Torn profile.
+
+To install by hand instead:
+1. Open the Tampermonkey dashboard and click the **+** tab.
+2. Delete everything in the editor.
+3. Paste in the whole of `dist/landingtimer.user.js`.
+4. Save with **Ctrl+S**.
 
 ## Using it
 

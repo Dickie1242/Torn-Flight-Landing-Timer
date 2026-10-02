@@ -35,6 +35,9 @@ test('the bundle starts with the metadata block and is one IIFE', () => {
   assert.match(code, /\/\/ @match\s+https:\/\/www\.torn\.com\/\*/);
   assert.match(code, /\/\/ @run-at\s+document-idle/);
   assert.match(code, /\/\/ @noframes/, "not run inside Torn's frames");
+  const raw = 'https://raw.githubusercontent.com/Dickie1242/Torn-Flight-Landing-Timer/main/dist/landingtimer.user.js';
+  assert.match(code, new RegExp(`^// @downloadURL\\s+${raw.replace(/[.]/g, '\\.')}$`, 'm'), 'installs come from the built file on main');
+  assert.match(code, new RegExp(`^// @updateURL\\s+${raw.replace(/[.]/g, '\\.')}$`, 'm'), 'updates come from the built file on main');
   assert.match(code, /\/\/ ==\/UserScript==/);
   assert.match(code, /^\(\(\) => \{/m, 'bundle body must be an IIFE');
   assert.ok(!/^\s*import\s/m.test(code), 'no import statements survive bundling');
