@@ -70,7 +70,7 @@ export function attachDrag({ handle, element, win, getPos, setPos }) {
     win.removeEventListener('pointerup', onUp);
     win.removeEventListener('pointercancel', onUp);
     win.removeEventListener('blur', end);
-    handle.removeEventListener('lostpointercapture', end);
+    handle.removeEventListener('lostpointercapture', onLostCapture);
   }
 
   /** Ends the drag, saving where the box went if it really moved. */
@@ -92,8 +92,9 @@ export function attachDrag({ handle, element, win, getPos, setPos }) {
 
   function onMove(event) {
     if (!drag || event.pointerId !== drag.id) return;
-    // A mouse released where we could not hear it: the drag is over.
-    if (event.pointerType === 'mouse' && !(event.buttons & 1)) {
+    // A mouse or pen released where we could not hear it: the drag is over.
+    // (Touch is left out: a touch pointer only exists while it touches.)
+    if ((event.pointerType === 'mouse' || event.pointerType === 'pen') && !(event.buttons & 1)) {
       end();
       return;
     }
@@ -105,6 +106,12 @@ export function attachDrag({ handle, element, win, getPos, setPos }) {
 
   function onUp(event) {
     if (drag && event.pointerId === drag.id) end();
+  }
+
+  // lostpointercapture bubbles: only the handle losing this drag's own pointer
+  // ends it, not a second finger lifting off a button in the bar.
+  function onLostCapture(event) {
+    if (drag && event.pointerId === drag.id && event.target === handle) end();
   }
 
   function onDown(event) {
@@ -131,7 +138,7 @@ export function attachDrag({ handle, element, win, getPos, setPos }) {
     win.addEventListener('pointerup', onUp);
     win.addEventListener('pointercancel', onUp);
     win.addEventListener('blur', end);
-    handle.addEventListener('lostpointercapture', end);
+    handle.addEventListener('lostpointercapture', onLostCapture);
   }
 
   handle.addEventListener('pointerdown', onDown);

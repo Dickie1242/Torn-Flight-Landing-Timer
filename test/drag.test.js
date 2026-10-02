@@ -125,7 +125,7 @@ test('losing the window, the pointer capture or the pointer ends the drag', () =
     firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130 });
     firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210 });
     if (ending === 'blur') win.dispatchEvent(new win.Event('blur'));
-    else if (ending === 'lostpointercapture') handle.dispatchEvent(new win.Event('lostpointercapture'));
+    else if (ending === 'lostpointercapture') firePointer(handle, 'lostpointercapture', { pointerId: 1 });
     else firePointer(doc.body, 'pointercancel', { clientX: 110, clientY: 210 });
     firePointer(doc.body, 'pointermove', { clientX: 500, clientY: 400 });
     assert.deepEqual(saves, [{ x: 100, y: 200 }], ending);
@@ -170,4 +170,23 @@ test('destroy in the middle of a drag leaves nothing behind', () => {
   firePointer(doc.body, 'pointerup', { clientX: 110, clientY: 210 });
   assert.equal(element.style.left, '');
   assert.deepEqual(saves, []);
+});
+
+test('a second finger lifting off a button in the bar does not end the drag', () => {
+  const { doc, element, saves } = setup();
+  firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130, pointerId: 1 });
+  firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210, pointerId: 1 });
+  firePointer(doc.getElementById('mute'), 'lostpointercapture', { pointerId: 2, pointerType: 'touch' });
+  firePointer(doc.body, 'pointermove', { clientX: 210, clientY: 210, pointerId: 1 });
+  assert.equal(element.style.left, '200px', 'still following the first pointer');
+  assert.deepEqual(saves, []);
+});
+
+test('a pen lifted where we could not hear it ends the drag like a mouse', () => {
+  const { doc, element, saves } = setup();
+  firePointer(doc.getElementById('title'), 'pointerdown', { clientX: 710, clientY: 130, pointerType: 'pen' });
+  firePointer(doc.body, 'pointermove', { clientX: 110, clientY: 210, pointerType: 'pen' });
+  firePointer(doc.body, 'pointermove', { clientX: 500, clientY: 400, pointerType: 'pen', buttons: 0 });
+  assert.equal(element.style.left, '100px');
+  assert.deepEqual(saves, [{ x: 100, y: 200 }]);
 });

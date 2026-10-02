@@ -63,9 +63,9 @@ export function mountProfileButton({ doc = globalThis.document, isFlying, onOpen
     frame = 0;
     ensure();
   });
-  const observer = new win.MutationObserver(() => {
+  const observer = new win.MutationObserver(safe('button.schedule', () => {
     if (!frame) frame = win.requestAnimationFrame(run);
-  });
+  }));
   observer.observe(doc.body, { childList: true, subtree: true });
   run();
 
