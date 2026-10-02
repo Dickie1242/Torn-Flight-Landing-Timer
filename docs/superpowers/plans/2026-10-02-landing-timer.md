@@ -40,7 +40,8 @@
 | `src/profile/button.js` | `BUTTON_CLASS`, `BUTTON_ACTIVE_CLASS`, `BUTTON_LABEL`, `mountProfileButton` |
 | `src/widget/drag.js` | `DEFAULT_POS`, `clampPosition`, `attachDrag` |
 | `src/widget/widget.js` | `WIDGET_CLASS`, `ROW_CLASS`, `ROW_DUE_CLASS`, `SOUND_ON`, `SOUND_OFF`, `SOUND_BLOCKED_TITLE`, `rowState`, `placeText`, `rowTitle`, `createWidget` |
-| `src/core/alarm.js` | `LATE_LIMIT_MS`, `LOCK_NAME`, `HOLD_MS`, `defaultCanPlay`, `playChime`, `createAlarm` |
+| `src/core/alarm.js` | `LATE_LIMIT_MS`, `LOCK_NAME`, `HOLD_MS`, `RETRY_MS`, `isLate`, `createAlarm` (amended after review, Task 11) |
+| `src/core/audio.js` | `READY_TIMEOUT_MS`, `createAudio` → `{ unlock, ready, play, isBlocked, likely }` (added after review, Task 11) |
 | `testlib/fakes.js` | `MIN`, `T0`, `fakeClock`, `memoryArea`, `fakeLocks`, `makeTimer`, `flush`, `captureConsole` |
 | `testlib/dom.js` | `PROFILE_URL`, `statusHtml`, `profileDoc`, `settle`, `stubRect`, `firePointer` |
 
@@ -3438,6 +3439,16 @@ git add src/core/alarm.js test/alarm.test.js
 git commit -m "feat: chime once per timer in exactly one tab" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
+> **Amended after code review.** The code above was built as written, then reworked in a follow-up commit. The committed files are authoritative.
+> - **Sound moved out:** sound lives in `src/core/audio.js` (`createAudio`). It starts the AudioContext on a real gesture, and `ready()` says whether it actually runs. `likely()` drives the widget's "click to allow" hint, replacing `defaultCanPlay`.
+> - **Mark only after sound starts:** inside the lock, the alarm re-reads storage. It marks silent rings (sound off, or late) at once, but marks audible rings only after `audio.ready()`. A tab that can't play leaves them for another tab, or for the next click here, and doesn't try again until a click.
+> - **Timers due together:** they ring in one acquisition with one chime. A tab that finds the lock busy retries after `RETRY_MS`.
+> - **Lateness:** it is measured from the landing (`isLate`).
+> - **Timeouts and interval:** ring timeouts are re-aimed only for timers that changed. The 1 s check runs only while a timer is waiting, and gestures (capture phase) act only then. A lock API that refuses with `SecurityError` falls back to ringing directly.
+> - **Test fakes:** locks are granted asynchronously, and `laggyAreas` models localStorage reaching other tabs late, so a test shows `HOLD_MS` is what prevents a double chime.
+> - **Storage:** `reload()` keeps a tab's unsaved changes while writes fail.
+> - **No frames:** the header gains `@noframes`.
+
 ---
 
 ### Task 12: Stylesheet, wiring and the smoke test
@@ -3692,7 +3703,8 @@ import { info, safe } from './core/log.js';
 import { injectStyles } from './core/styles.js';
 import { VERSION } from './core/version.js';
 import { createStorage } from './core/storage.js';
-import { createAlarm, defaultCanPlay } from './core/alarm.js';
+import { createAlarm } from './core/alarm.js';
+import { createAudio } from './core/audio.js';
 import { createWidget } from './widget/widget.js';
 import { readStatus } from './profile/readStatus.js';
 import { mountProfileButton } from './profile/button.js';
@@ -3715,9 +3727,9 @@ function boot() {
   injectStyles(document);
 
   const storage = createStorage();
-  const canPlay = () => defaultCanPlay();
-  createWidget({ doc: document, storage, canPlay }).start();
-  createAlarm({ storage, canPlay }).start();
+  const audio = createAudio({ win: window });
+  createWidget({ doc: document, storage, canPlay: audio.likely }).start();
+  createAlarm({ storage, audio }).start();
 
   if (selectors.isProfilePage(location)) {
     const panel = createPanel({ doc: document, storage });
@@ -3838,6 +3850,14 @@ The box can be dragged by its title bar. Click a name to open that profile, and 
 
 If someone travels disguised, the profile only says "Traveling", so you pick the destination and plane yourself.
 
+### Known limits
+
+- **A Torn tab must be open** for the chime. If none is, there's no chime, but the box shows where things stand as soon as you open Torn again.
+- **Sleeping tabs can't chime.** Chrome's Memory Saver and Energy Saver can put background tabs to sleep, and a sleeping tab can't chime. To be safe, keep one Torn tab where you'll see it, or turn Memory Saver off for torn.com.
+- **Sound needs a click.** Browsers only let a page make sound after you've clicked in it. If 🔊 shows as 🔇, click anywhere on that Torn page once.
+- **Times are estimates.** Flights vary by up to about 3%. The "Mailing Yourself Abroad" book (−25%) and the Detective Agency's delay are not shown on a profile, so your buffer has to cover them.
+- **It has only been tested in Chrome and Edge.**
+
 ### Flight times (one way, minutes)
 
 These are the times after Torn's 23 June 2026 travel patch, without the "Mailing Yourself Abroad" book.
@@ -3922,6 +3942,7 @@ src/core/flights.js           the flight table
 src/core/selectors.js         EVERY Torn page lookup lives here
 src/core/storage.js           timers and settings, shared across tabs
 src/core/alarm.js             rings each timer once, in one tab
+src/core/audio.js             the synthesised chime, and whether this tab may play it
 src/core/time.js, clock.js    formatting; the injectable clock
 src/core/dom.js, log.js       element builder; console helpers
 src/core/version.js, styles.js build version; stylesheet injection

@@ -206,31 +206,42 @@ It is on every Torn page and hidden while there are no timers.
   starts at top-right, 16 px from the right edge and 120 px down. Its z-index
   sits above Torn's and Chat+'s chat boxes.
 
-### 5.4 Chime (`src/core/alarm.js`)
+### 5.4 Chime (`src/core/alarm.js`, `src/core/audio.js`)
 
 - **The sound:** three short beeps, about 1.5 s in total, synthesised with Web
-  Audio.
+  Audio (`audio.js`).
 - **The switch:** 🔊 toggles `settings.sound`, which is shared by all tabs.
   Default on.
 - **When:** each timer chimes **once, in exactly one tab**, at `ringAt`.
-- **Scheduling:** every tab schedules one plain `setTimeout` per timer that
-  hasn't rung yet, aimed at `ringAt`. Single, unchained timeouts avoid
-  Chrome's intensive throttling of hidden tabs. The 1 s tick,
-  `visibilitychange`, `focus` and the `storage` event re-check as a safety
-  net.
-- **Exactly once:** the chime is claimed with
-  `navigator.locks.request('landingtimer:ring')`. Inside the lock the tab
-  re-reads storage. If `rungAt` is still null, it writes `rungAt = now` and
-  plays the chime.
-- **Which tab:** browsers only let a tab play sound after the player has
-  clicked in it (`navigator.userActivation.hasBeenActive`). Only such tabs try
-  to claim the chime. When sound is on but the tab has had no click, the 🔊
-  icon shows as 🔇 with the tooltip "Click anywhere on this page to allow the
-  chime".
-- **Late:** if more than 2 minutes have passed since `ringAt` (computer asleep,
-  browser closed), the timer is marked rung without a sound. The row still
+  Timers that come due together share one chime.
+- **Scheduling:**
+  - Every tab aims one plain `setTimeout` at each timer that hasn't rung, and
+    re-aims only the timers that changed. Single, unchained timeouts avoid
+    Chrome's intensive throttling of hidden tabs.
+  - While a timer is waiting, a 1 s check, `visibilitychange`, `focus` and
+    storage changes re-check as a safety net.
+  - With nothing waiting, the alarm does nothing.
+- **Exactly once:**
+  - Rings are claimed with `navigator.locks.request('landingtimer:ring',
+    { ifAvailable: true })`, one lock for every timer.
+  - Inside the lock the tab re-reads storage, rings every due timer that is
+    still unrung, then holds the lock for 5 s so its write reaches the other
+    tabs first.
+  - A tab that finds the lock busy looks again 500 ms later.
+- **Which tab:**
+  - Browsers only let a tab play sound after the player has clicked in it. A
+    timer is marked rung only once this tab has actually started its audio.
+  - A tab that can't play leaves the ring for one that can, or for the next
+    click in this one: a click starts the audio and re-checks at once.
+  - While the tab is known to be blocked, or has never been clicked, the 🔊
+    icon shows as 🔇 with the tooltip "Click anywhere on this page to allow
+    the chime". Clicking it counts as that click; it does not mute.
+- **Late:** if more than 2 minutes have passed since the estimated landing
+  (computer asleep, browser closed), the timer is marked rung without a sound.
+  A big buffer therefore still chimes late, up to the landing. The row still
   shows red.
-- **Sound off:** the timer is marked rung silently.
+- **Sound off:** the timer is marked rung silently. The setting is read
+  afresh inside the lock, so a mute in another tab counts at once.
 
 ## 6. Storage (`src/core/storage.js`)
 
