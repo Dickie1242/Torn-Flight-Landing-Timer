@@ -3053,6 +3053,15 @@ git add src/widget/widget.js test/widget.test.js
 git commit -m "feat: floating timer box with countdown, landing states and mute" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
+> **Amended after code review.** The code above was built as written, then changed in a follow-up commit. The committed files are authoritative.
+> - **✕ double-click:** the second click of a double-click is ignored, so it can't remove the row that slides up.
+> - **🔇 hint:** a click on the "click to allow the chime" hint is treated as that permission, not a mute.
+> - **Quieter rendering:** the box writes only text and attributes that changed (through Text nodes), does nothing while empty, and re-places itself only when its rows change shape or storage changes.
+> - **Clock checks:** it checks the clock every `TICK_MS` (250 ms) while the page is visible, and catches up on `visibilitychange`.
+> - **Re-renders:** nested re-renders from `prune()` are skipped.
+> - **Labels:** each ✕ is labelled with the player's name, and the sound button is labelled "Chime".
+> - **Stylesheet (Task 12):** a name with no profile link isn't styled as a link.
+
 ---
 
 ### Task 11: The chime
@@ -3664,7 +3673,8 @@ Expected: the stylesheet test FAILS (no `landingtimer-panel` in the bundle) and 
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.landingtimer-row__name:hover { text-decoration: underline; }
+.landingtimer-row__name[href]:hover { text-decoration: underline; }
+.landingtimer-row__name:not([href]) { color: inherit; }
 .landingtimer-row__place { color: #bbb; }
 .landingtimer-row__time { font-variant-numeric: tabular-nums; text-align: right; }
 .landingtimer-row__remove { font: inherit; padding: 0; color: #999; background: none; border: 0; cursor: pointer; }
