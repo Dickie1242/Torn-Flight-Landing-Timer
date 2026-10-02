@@ -1,7 +1,12 @@
-/* Landing Timer: the whole stylesheet, injected once at boot. */
+/* Landing Timer: the whole stylesheet, injected once at boot.
+ *
+ * Torn styles plain elements (a, button, select, input, label, b) with rules
+ * of its own, some under body classes, and loads some of its CSS after ours.
+ * Every rule here carries :not(#_), which matches every element and adds an
+ * id's worth of specificity, so ours win without !important. */
 
 /* The profile button, right after Torn's status box. */
-.landingtimer-button {
+.landingtimer-button:not(#_) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -14,12 +19,12 @@
   border-radius: 4px;
   cursor: pointer;
 }
-.landingtimer-button:hover { background: #3d3d3d; }
-.landingtimer-button--active { color: #fff; background: #2f6f3e; border-color: #4caf50; }
-.landingtimer-button--active:hover { background: #377f48; }
+.landingtimer-button:not(#_):hover { background: #3d3d3d; }
+.landingtimer-button--active:not(#_) { color: #fff; background: #2f6f3e; border-color: #4caf50; }
+.landingtimer-button--active:not(#_):hover { background: #377f48; }
 
 /* The panel. Above Torn's chat and Chat+'s menu. */
-.landingtimer-panel {
+.landingtimer-panel:not(#_) {
   position: fixed;
   z-index: 2147483647;
   width: 320px;
@@ -29,16 +34,22 @@
   padding: 10px 12px;
   font: 12px/1.5 Arial, sans-serif;
   color: #e8e8e8;
+  color-scheme: dark;
+  text-align: left;
   background: #232323;
   border: 1px solid #555;
   border-radius: 6px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
 }
-.landingtimer-panel__title { font-size: 13px; margin-bottom: 2px; }
-.landingtimer-panel__status { color: #aaa; margin-bottom: 8px; }
-.landingtimer-panel__row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
-.landingtimer-panel select,
-.landingtimer-panel input[type="number"] {
+/* Torn's own label/span/div rules must not reach in. :where() keeps this as
+ * specific as the rules below, which come later and so still win. */
+.landingtimer-panel:not(#_) :where(label, span, div, b) { color: inherit; font: inherit; }
+.landingtimer-panel__title:not(#_) { font-size: 13px; margin-bottom: 2px; }
+.landingtimer-panel__title:not(#_) b { font-weight: 700; color: inherit; }
+.landingtimer-panel__status:not(#_) { color: #aaa; margin-bottom: 8px; }
+.landingtimer-panel__row:not(#_) { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.landingtimer-panel:not(#_) select,
+.landingtimer-panel:not(#_) input[type="number"] {
   font: inherit;
   color: #e8e8e8;
   background: #111;
@@ -46,24 +57,24 @@
   border-radius: 3px;
   padding: 2px 4px;
 }
-.landingtimer-panel input[type="number"] { width: 48px; }
-.landingtimer-panel__planes { margin: 6px 0; }
-.landingtimer-panel__plane {
+.landingtimer-panel:not(#_) input[type="number"] { width: 48px; }
+.landingtimer-panel__planes:not(#_) { margin: 6px 0; }
+.landingtimer-panel__plane:not(#_) {
   display: grid;
   grid-template-columns: 18px 84px 70px 1fr;
   align-items: center;
   padding: 2px 0;
   cursor: pointer;
 }
-.landingtimer-panel__minutes { font-variant-numeric: tabular-nums; }
-.landingtimer-panel__tag { color: #8bc34a; font-size: 11px; }
-.landingtimer-panel__summary { margin-top: 6px; font-weight: 600; }
-.landingtimer-panel__variance { color: #aaa; font-size: 11px; }
-.landingtimer-panel__variance--warn { color: #ffb74d; }
-.landingtimer-panel__error { color: #ff8a80; font-weight: 600; }
-.landingtimer-panel__error:empty { display: none; }
-.landingtimer-panel__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
-.landingtimer-panel__actions button {
+.landingtimer-panel__minutes:not(#_) { font-variant-numeric: tabular-nums; }
+.landingtimer-panel__tag:not(#_) { color: #8bc34a; font-size: 11px; }
+.landingtimer-panel__summary:not(#_) { margin-top: 6px; font-weight: 600; }
+.landingtimer-panel__variance:not(#_) { color: #aaa; font-size: 11px; }
+.landingtimer-panel__variance--warn:not(#_) { color: #ffb74d; }
+.landingtimer-panel__error:not(#_) { color: #ff8a80; font-weight: 600; }
+.landingtimer-panel__error:not(#_):empty { display: none; }
+.landingtimer-panel__actions:not(#_) { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.landingtimer-panel__actions:not(#_) button {
   font: inherit;
   padding: 4px 12px;
   color: #e8e8e8;
@@ -72,11 +83,11 @@
   border-radius: 4px;
   cursor: pointer;
 }
-.landingtimer-panel__actions button[data-action="start"] { color: #fff; background: #2f6f3e; border-color: #4caf50; }
-.landingtimer-panel__actions button:disabled { opacity: 0.45; cursor: default; }
+.landingtimer-panel__actions:not(#_) button[data-action="start"] { color: #fff; background: #2f6f3e; border-color: #4caf50; }
+.landingtimer-panel__actions:not(#_) button:disabled { opacity: 0.45; cursor: default; }
 
 /* The floating timer box, on every page. Above Torn's and Chat+'s chats. */
-.landingtimer-widget {
+.landingtimer-widget:not(#_) {
   position: fixed;
   z-index: 2147483646;
   top: 120px;
@@ -84,14 +95,17 @@
   min-width: 240px;
   font: 12px/1.4 Arial, sans-serif;
   color: #e8e8e8;
+  color-scheme: dark;
+  text-align: left;
   background: rgba(28, 28, 28, 0.95);
   border: 1px solid #555;
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   user-select: none;
 }
-.landingtimer-widget[hidden] { display: none !important; }
-.landingtimer-widget__bar {
+.landingtimer-widget[hidden]:not(#_) { display: none !important; }
+.landingtimer-widget:not(#_) :where(span, div) { color: inherit; font: inherit; }
+.landingtimer-widget__bar:not(#_) {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -101,17 +115,17 @@
   cursor: move;
   touch-action: none;
 }
-.landingtimer-widget__title { font-weight: 600; }
-.landingtimer-widget__sound { font: inherit; padding: 0 2px; color: inherit; background: none; border: 0; cursor: pointer; }
-.landingtimer-widget__list { max-height: calc(100vh - 48px); overflow-y: auto; padding: 2px 0; }
-.landingtimer-row {
+.landingtimer-widget__title:not(#_) { font-weight: 600; }
+.landingtimer-widget__sound:not(#_) { font: inherit; padding: 0 2px; color: inherit; background: none; border: 0; cursor: pointer; }
+.landingtimer-widget__list:not(#_) { max-height: calc(100vh - 48px); overflow-y: auto; padding: 2px 0; }
+.landingtimer-row:not(#_) {
   display: grid;
   grid-template-columns: 1fr auto auto 18px;
   gap: 8px;
   align-items: center;
   padding: 3px 8px;
 }
-.landingtimer-row__name {
+.landingtimer-row__name:not(#_) {
   max-width: 120px;
   overflow: hidden;
   color: #8ab4f8;
@@ -119,11 +133,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.landingtimer-row__name[href]:hover { text-decoration: underline; }
-.landingtimer-row__name:not([href]) { color: inherit; }
-.landingtimer-row__place { color: #bbb; }
-.landingtimer-row__time { font-variant-numeric: tabular-nums; text-align: right; }
-.landingtimer-row__remove { font: inherit; padding: 0; color: #999; background: none; border: 0; cursor: pointer; }
-.landingtimer-row__remove:hover { color: #fff; }
-.landingtimer-row--due { background: rgba(200, 40, 40, 0.35); }
-.landingtimer-row--due .landingtimer-row__time { color: #ff8a80; font-weight: 700; }
+.landingtimer-row__name[href]:not(#_):hover { text-decoration: underline; }
+.landingtimer-row__name:not([href]):not(#_) { color: inherit; }
+.landingtimer-row__place:not(#_) { color: #bbb; }
+.landingtimer-row__time:not(#_) { font-variant-numeric: tabular-nums; text-align: right; }
+.landingtimer-row__remove:not(#_) { font: inherit; padding: 0; color: #999; background: none; border: 0; cursor: pointer; }
+.landingtimer-row__remove:not(#_):hover { color: #fff; }
+.landingtimer-row--due:not(#_) { background: rgba(200, 40, 40, 0.35); }
+.landingtimer-row--due:not(#_) .landingtimer-row__time { color: #ff8a80; font-weight: 700; }
+
+/* A visible focus ring, in case Torn turns outlines off. */
+.landingtimer-button:not(#_):focus-visible,
+.landingtimer-panel:not(#_) :focus-visible,
+.landingtimer-widget:not(#_) :focus-visible { outline: 2px solid #8ab4f8; outline-offset: 1px; }

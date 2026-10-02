@@ -17,9 +17,11 @@ const FLYING_STATES = new Set(['traveling', 'hidden']);
 const RUNNING_ATTR = 'data-landingtimer-running';
 
 function boot() {
+  // @match also covers files on torn.com that are not pages (an SVG opened in a tab).
+  if (!document.body) return;
   const root = document.documentElement;
   if (root.hasAttribute(RUNNING_ATTR)) {
-    info('another copy is already running on this page; this one stays idle');
+    info(`version ${root.getAttribute(RUNNING_ATTR)} is already running on this page; this copy stays idle`);
     return;
   }
   root.setAttribute(RUNNING_ATTR, VERSION);
@@ -28,17 +30,21 @@ function boot() {
 
   const storage = createStorage();
   const audio = createAudio({ win: window });
-  createWidget({ doc: document, storage, canPlay: audio.likely }).start();
-  createAlarm({ storage, audio }).start();
+
+  // Each part starts on its own, so a failure in one never silences the others.
+  safe('main.widget', () => createWidget({ doc: document, storage, canPlay: audio.likely }).start())();
+  safe('main.alarm', () => createAlarm({ storage, audio }).start())();
 
   if (selectors.isProfilePage(location)) {
-    const panel = createPanel({ doc: document, storage });
-    const status = () => readStatus(document, location.href);
-    mountProfileButton({
-      doc: document,
-      isFlying: () => FLYING_STATES.has(status().state),
-      onOpen: (button) => (panel.isOpen() ? panel.close() : panel.open(button, status())),
-    });
+    safe('main.profile', () => {
+      const panel = createPanel({ doc: document, storage });
+      const status = () => readStatus(document, location.href);
+      mountProfileButton({
+        doc: document,
+        isFlying: () => FLYING_STATES.has(status().state),
+        onOpen: safe('main.panel', (button) => (panel.isOpen() ? panel.close() : panel.open(button, status()))),
+      });
+    })();
   }
 
   info('ready');

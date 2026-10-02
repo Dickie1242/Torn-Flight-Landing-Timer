@@ -101,15 +101,13 @@ export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT
   }
 
   /**
-   * Is sound likely to work here? For the "click to allow" hint: a running
-   * context, or a page the player has clicked in, unless a ring has just
-   * found it blocked.
+   * Is sound likely to work here? For the "click to allow" hint: yes, unless a
+   * check found this tab blocked and no click has come since. Not "has this
+   * page been clicked": Chrome carries that permission across Torn's page
+   * loads, so asking would raise a false alarm on every page.
    */
   function likely() {
-    if (running()) return true;
-    if (blocked) return false;
-    const activation = win && win.navigator && win.navigator.userActivation;
-    return activation ? !!activation.hasBeenActive : true;
+    return running() || !blocked;
   }
 
   return { unlock, ready, play, isBlocked, likely };

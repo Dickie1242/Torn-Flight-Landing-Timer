@@ -3767,6 +3767,16 @@ git add src/styles.css src/main.js test/build.test.js dist
 git commit -m "feat: wire button, panel, timer box and chime; stylesheet; smoke test" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
+> **Amended after code review.** The code above was built as written, then changed in a follow-up commit. The committed files are authoritative.
+> - **Stylesheet:** every rule carries `:not(#_)`, so Torn's own `a`, `button`, `select`, `label` and `b` rules can't override ours. Plain-element resets use `:where()` and come first, so the component rules still win. It also adds `color-scheme: dark` and `:focus-visible` rings.
+> - **`main.js`:** it returns early on non-HTML files, starts the widget, the alarm and the profile button each in its own `safe()`, wraps `onOpen` in `safe()`, and the idle message names the copy that is running.
+> - **Sound hint:** with a timer waiting, the alarm checks once whether this tab can play (`audio.ready()`). `audio.likely()` is now "not known to be blocked", so the 🔇 hint no longer shows after every page load.
+> - **Smoke tests:**
+>   - The build test checks the new selector form and the wider no-network list (CSS `url(`/`@import`, workers, `addModule`, `eval`, `window.open`, `fetchLater`, `WebTransport`, `RTCPeerConnection`).
+>   - It boots once after `load` as well.
+>   - It lets the tick and the 1 s check run before reading `problems`.
+>   - A smoke test proves the chime is wired: a due timer, a fake AudioContext, one chime, marked rung.
+
 ---
 
 ### Task 13: README
@@ -3919,6 +3929,8 @@ Run through this on `https://www.torn.com/` after installing a new build.
 - [ ] Someone travelling disguised: the panel opens blank and Start waits for a country and plane.
 - [ ] Drag the box somewhere, reload: it stays there. Shrink the window: it stays on screen.
 - [ ] A profile of someone at home: the button is grey and still opens the panel.
+- [ ] In both Torn's light and dark mode, the button, the panel and the box look right, with readable text, a blue name link and a green plane tag. The box and the panel sit above the chat.
+- [ ] With a timer running, open Torn in a new tab and don't click in it. Within a few seconds 🔊 either stays (Chrome allows sound) or turns 🔇. One click in the page turns it back to 🔊.
 
 ## How to send the profile HTML
 

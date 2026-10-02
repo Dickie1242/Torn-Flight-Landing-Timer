@@ -91,15 +91,18 @@ test('a click unblocks the tab and asks the context to start', async () => {
   assert.equal(made.length, 1);
 });
 
-test('likely() follows a running context, then whether the page has been clicked', async () => {
-  const fresh = fakeWin({ activated: false });
-  assert.equal(createAudio({ win: fresh.win }).likely(), false, 'never clicked, nothing started');
-  const clicked = fakeWin({ activated: true });
-  assert.equal(createAudio({ win: clicked.win }).likely(), true);
-  const running = fakeWin({ state: 'running', activated: false });
-  const audio = createAudio({ win: running.win, timeoutMs: 5 });
+test('likely() is yes until a check finds the tab blocked, and yes again after a click', async () => {
+  const { win } = fakeWin({ resume: 'hang', activated: false });
+  const audio = createAudio({ win, timeoutMs: 5 });
+  assert.equal(audio.likely(), true, 'nothing known against it: no false alarm after every page load');
   await audio.ready();
-  assert.equal(audio.likely(), true, 'the browser let it start without a click');
+  assert.equal(audio.likely(), false);
+  audio.unlock();
+  assert.equal(audio.likely(), true);
+  const running = fakeWin({ state: 'running', activated: false });
+  const playing = createAudio({ win: running.win, timeoutMs: 5 });
+  await playing.ready();
+  assert.equal(playing.likely(), true, 'the browser let it start without a click');
 });
 
 test('with no Web Audio at all it is never ready, never plays and never throws', async () => {

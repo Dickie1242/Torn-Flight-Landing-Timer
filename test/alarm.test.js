@@ -19,7 +19,9 @@ function fakeAudio(clock, plays, { allowed = true } = {}) {
     allowed,
     blocked: false,
     unlocks: 0,
+    readies: 0,
     async ready() {
+      audio.readies += 1;
       audio.blocked = !audio.allowed;
       return audio.allowed;
     },
@@ -325,4 +327,19 @@ test('a ring that keeps failing retries once a second, not in a tight loop', asy
     warn.restore();
   }
   assert.ok(requests <= 4, `${requests} attempts in 3 s`);
+});
+
+test('with a timer waiting, the tab checks once whether it may play, so the hint shows before the ring', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const t = tab({ area, clock, locks: fakeLocks(), allowed: false });
+  await flush();
+  assert.equal(t.audio.readies, 0, 'nothing waiting: nothing checked');
+  t.storage.addTimer(makeTimer());
+  await flush();
+  assert.equal(t.audio.readies, 1);
+  assert.equal(t.audio.likely(), false, 'the box can say "click to allow" 25 minutes before the ring');
+  t.storage.addTimer(makeTimer({ id: '42' }));
+  await flush();
+  assert.equal(t.audio.readies, 1, 'once per page');
 });

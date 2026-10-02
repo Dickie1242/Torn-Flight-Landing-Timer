@@ -68,6 +68,8 @@ export function createAlarm({
   let claiming = false;
   let retryPending = false;
   let locksBroken = false;
+  /** Whether this page has checked yet if it may play sound. */
+  let probed = false;
 
   const safePlay = safe('alarm.play', () => audio.play());
 
@@ -193,6 +195,12 @@ export function createAlarm({
     const timers = waiting();
     reschedule(timers);
     syncInterval(timers.length > 0);
+    // With a timer waiting, find out once whether this tab can play, so the
+    // "click to allow" hint shows long before the ring rather than at it.
+    if (timers.length > 0 && !probed) {
+      probed = true;
+      Promise.resolve(audio.ready()).catch(() => {});
+    }
     tick();
   });
 
