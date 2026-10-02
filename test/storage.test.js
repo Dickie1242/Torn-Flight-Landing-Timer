@@ -118,8 +118,9 @@ test('settings are clamped and sanitised', () => {
 });
 
 test('setSetting writes and notifies only when the value changes', () => {
+  const inner = memoryArea();
   let writes = 0;
-  const area = { getItem: () => null, setItem: () => { writes += 1; } };
+  const area = { getItem: (key) => inner.getItem(key), setItem: (key, value) => { writes += 1; inner.setItem(key, value); } };
   const storage = createStorage({ area, target: null, clock: fakeClock(T0) });
   let hits = 0;
   storage.subscribe(() => { hits += 1; });
@@ -203,4 +204,65 @@ test('a throwing subscriber does not stop the others', () => {
   }
   assert.deepEqual(seen, ['first', 'second']);
   assert.equal(warn.calls.length, 1);
+});
+
+test('a write from a tab with a stale copy keeps the other tab\'s change', () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const a = createStorage({ area, target: null, clock });
+  const b = createStorage({ area, target: null, clock });
+  a.addTimer(makeTimer({ id: '1' }));
+  b.addTimer(makeTimer({ id: '2' }));
+  b.setSetting('sound', false);
+  const after = createStorage({ area, target: null, clock });
+  assert.deepEqual(after.getTimers().map((t) => t.id).sort(), ['1', '2']);
+  assert.equal(after.getSetting('sound'), false);
+});
+
+test('a ring claimed in one tab is not undone by another tab\'s write, nor claimed again', () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const a = createStorage({ area, target: null, clock });
+  const b = createStorage({ area, target: null, clock });
+  a.addTimer(makeTimer());
+  b.reload();
+  assert.equal(a.markRung('1234567', T0 + 25 * MIN), true);
+  b.setSetting('widgetPos', { x: 1, y: 2 });
+  b.reload();
+  assert.equal(b.getTimer('1234567').rungAt, T0 + 25 * MIN);
+  assert.equal(b.markRung('1234567', T0 + 26 * MIN), false);
+});
+
+test('markRung refuses a time that is not a time', () => {
+  const { storage } = fresh();
+  storage.addTimer(makeTimer());
+  assert.equal(storage.markRung('1234567', Number.NaN), false);
+  assert.equal(storage.getTimer('1234567').rungAt, null);
+});
+
+test('a page restored from the back/forward cache re-reads storage', () => {
+  const area = memoryArea();
+  const target = new EventTarget();
+  const clock = fakeClock(T0);
+  const storage = createStorage({ area, target, clock });
+  let hits = 0;
+  storage.subscribe(() => { hits += 1; });
+  createStorage({ area, target: null, clock }).addTimer(makeTimer());
+  target.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+  assert.equal(hits, 0, 'an ordinary page load is not a restore');
+  target.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  assert.equal(hits, 1);
+  assert.equal(storage.getTimers().length, 1);
+  storage.destroy();
+  target.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  assert.equal(hits, 1, 'destroy removes the listener');
+});
+
+test('nonsense times and over-long ids are refused; long names are trimmed', () => {
+  assert.equal(sanitizeTimer(makeTimer({ ringAt: T0 + 28 * MIN })), null, 'rings after landing');
+  assert.equal(sanitizeTimer(makeTimer({ startedAt: T0 + 26 * MIN })), null, 'starts after it rings');
+  assert.equal(sanitizeTimer(makeTimer({ landingAt: T0 + 25 * 60 * MIN })), null, 'a 25-hour flight');
+  assert.equal(sanitizeTimer(makeTimer({ id: 'x'.repeat(81) })), null);
+  assert.equal(sanitizeTimer(makeTimer({ id: 'name:Ghost' })).id, 'name:Ghost');
+  assert.equal(sanitizeTimer(makeTimer({ name: 'n'.repeat(100) })).name.length, 64);
 });

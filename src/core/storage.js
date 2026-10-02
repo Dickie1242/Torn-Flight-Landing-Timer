@@ -49,14 +49,22 @@ function sanitizeSettings(raw) {
 
 const isTime = (value) => Number.isFinite(value) && value > 0;
 
+/** No Torn flight is anywhere near this long; a longer one is corrupt. */
+const MAX_FLIGHT_MS = 24 * 60 * 60 * 1000;
+/** A player id, or 'name:' plus a Torn name for a player whose id was not shown. */
+const MAX_ID_LENGTH = 80;
+const MAX_NAME_LENGTH = 64;
+
 /** @returns {Timer|null} a clean copy, or null when the record is unusable. */
 export function sanitizeTimer(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const id = typeof raw.id === 'string' ? raw.id.trim() : '';
-  if (!id || !isDestination(raw.destination) || !isPlane(raw.plane)) return null;
+  if (!id || id.length > MAX_ID_LENGTH || !isDestination(raw.destination) || !isPlane(raw.plane)) return null;
   if (!(Number.isFinite(raw.minutes) && raw.minutes > 0)) return null;
   if (!isTime(raw.startedAt) || !isTime(raw.landingAt) || !isTime(raw.ringAt)) return null;
-  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : `#${id}`;
+  if (!(raw.startedAt <= raw.ringAt && raw.ringAt <= raw.landingAt)) return null;
+  if (raw.landingAt - raw.startedAt > MAX_FLIGHT_MS) return null;
+  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, MAX_NAME_LENGTH) : `#${id}`;
   return {
     id,
     name,
@@ -138,6 +146,19 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
     notify();
   }
 
+  /**
+   * Applies a change to what is stored now, not to this tab's cached copy:
+   * another tab may have written since our last storage event, and writing our
+   * stale copy back would undo its change (a timer it just added, a ring it
+   * just claimed). `apply` returns whether it changed anything.
+   */
+  function update(apply) {
+    read();
+    const changed = apply();
+    if (changed) commit();
+    return changed;
+  }
+
   const live = (timer) => clock.now() - timer.landingAt < EXPIRE_AFTER_MS;
 
   /** Every timer that has not expired, soonest ring first. @returns {Timer[]} */
@@ -155,37 +176,51 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
   function addTimer(raw) {
     const timer = sanitizeTimer(raw);
     if (!timer) return null;
-    state.timers = state.timers.filter((t) => t.id !== timer.id).concat(timer);
-    commit();
+    update(() => {
+      state.timers = state.timers.filter((t) => t.id !== timer.id).concat(timer);
+      return true;
+    });
     return { ...timer };
   }
 
   /** @returns {boolean} whether a timer was removed. */
   function removeTimer(id) {
-    const next = state.timers.filter((t) => t.id !== id);
-    if (next.length === state.timers.length) return false;
-    state.timers = next;
-    commit();
-    return true;
+    return update(() => {
+      const next = state.timers.filter((t) => t.id !== id);
+      if (next.length === state.timers.length) return false;
+      state.timers = next;
+      return true;
+    });
   }
 
-  /** Records that a timer rang. @returns {boolean} false if it had already rung or is gone. */
+  /**
+   * Records that a timer rang. @returns {boolean} false if it had already rung,
+   * is gone, or `at` is not a time. Every write saves the whole blob, so two tabs
+   * marking different timers within a few milliseconds could still undo each
+   * other's mark: rings are claimed under one Web Lock shared by every timer
+   * (see alarm.js).
+   */
   function markRung(id, at) {
-    const timer = state.timers.find((t) => t.id === id);
-    if (!timer || timer.rungAt != null) return false;
-    timer.rungAt = at;
-    commit();
-    return true;
+    if (!isTime(at)) return false;
+    return update(() => {
+      const timer = state.timers.find((t) => t.id === id);
+      if (!timer || timer.rungAt != null) return false;
+      timer.rungAt = at;
+      return true;
+    });
   }
 
   /** Drops expired timers from storage. @returns {number} how many went. */
   function prune() {
-    const next = state.timers.filter(live);
-    const gone = state.timers.length - next.length;
-    if (gone) {
+    // Every tab calls this every second: skip the re-read while nothing has expired.
+    if (state.timers.every(live)) return 0;
+    let gone = 0;
+    update(() => {
+      const next = state.timers.filter(live);
+      gone = state.timers.length - next.length;
       state.timers = next;
-      commit();
-    }
+      return gone > 0;
+    });
     return gone;
   }
 
@@ -198,11 +233,12 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
   /** Sanitises and stores `value`; unknown names are dropped. @returns the stored value. */
   function setSetting(name, value) {
     if (!Object.hasOwn(DEFAULT_SETTINGS, name)) return undefined;
-    const next = sanitizeSettings({ ...state.settings, [name]: value });
-    if (JSON.stringify(next[name]) !== JSON.stringify(state.settings[name])) {
+    update(() => {
+      const next = sanitizeSettings({ ...state.settings, [name]: value });
+      if (JSON.stringify(next[name]) === JSON.stringify(state.settings[name])) return false;
       state.settings = next;
-      commit();
-    }
+      return true;
+    });
     return getSetting(name);
   }
 
@@ -223,9 +259,18 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
     notify();
   };
 
+  // A page restored from the back/forward cache missed every storage event
+  // while it was away.
+  const onPageShow = (event) => {
+    if (!event || !event.persisted) return;
+    read();
+    notify();
+  };
+
   function destroy() {
     if (target && typeof target.removeEventListener === 'function') {
       target.removeEventListener('storage', onStorage);
+      target.removeEventListener('pageshow', onPageShow);
     }
     listeners.clear();
   }
@@ -233,6 +278,7 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
   read();
   if (target && typeof target.addEventListener === 'function') {
     target.addEventListener('storage', onStorage);
+    target.addEventListener('pageshow', onPageShow);
   }
 
   return {
