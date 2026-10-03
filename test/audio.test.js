@@ -15,6 +15,7 @@ function fakeWin({ state = 'suspended', resume = 'start' } = {}) {
       this.currentTime = 0;
       this.destination = {};
       this.oscillators = 0;
+      this.notes = [];
       made.push(this);
     }
 
@@ -35,7 +36,9 @@ function fakeWin({ state = 'suspended', resume = 'start' } = {}) {
 
     createOscillator() {
       this.oscillators += 1;
-      return { type: '', frequency: { value: 0 }, connect() {}, start() {}, stop() {} };
+      const osc = { type: '', frequency: { value: 0 }, connect() {}, start() {}, stop() {} };
+      this.notes.push(osc);
+      return osc;
     }
 
     createGain() {
@@ -139,4 +142,29 @@ test('a closed context is replaced, not reused', async () => {
   made[0].state = 'closed';
   assert.equal(audio.play(), true);
   assert.equal(made.length, 2);
+});
+
+test('the landing chime is its own sound: four rising notes, not the three equal beeps', async () => {
+  const { win, made } = fakeWin({ resume: 'start' });
+  const audio = createAudio({ win, timeoutMs: 5 });
+  await audio.ready();
+  assert.equal(audio.play('ring'), true);
+  const ring = made[0].notes.splice(0);
+  assert.deepEqual(ring.map((o) => o.frequency.value), [880, 880, 880]);
+  assert.equal(audio.play('land'), true);
+  const land = made[0].notes;
+  assert.equal(land.length, 4);
+  const pitches = land.map((o) => o.frequency.value);
+  assert.deepEqual([...pitches].sort((a, b) => a - b), pitches, 'rising');
+  assert.ok(land.every((o) => o.type !== ring[0].type), 'a different voice too');
+});
+
+test('play() without a kind, or with an unknown one, plays the warning', async () => {
+  const { win, made } = fakeWin({ resume: 'start' });
+  const audio = createAudio({ win, timeoutMs: 5 });
+  await audio.ready();
+  audio.play();
+  audio.play('constructor');
+  assert.equal(made[0].notes.length, 6);
+  assert.ok(made[0].notes.every((o) => o.frequency.value === 880));
 });

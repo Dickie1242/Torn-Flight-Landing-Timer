@@ -23,8 +23,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
  * @typedef {{
  *   id: string, name: string, destination: string, plane: string,
  *   direction: 'to'|'from'|null, minutes: number,
- *   startedAt: number, landingAt: number, ringAt: number, rungAt: number|null,
+ *   startedAt: number, landingAt: number, ringAt: number,
+ *   rungAt: number|null, landRungAt: number|null,
  * }} Timer
+ *   `rungAt` is when the warning chime rang (a few minutes before landing),
+ *   `landRungAt` when the landing chime did; null until then.
  */
 
 export function sanitizeBuffer(value) {
@@ -76,6 +79,7 @@ export function sanitizeTimer(raw) {
     landingAt: raw.landingAt,
     ringAt: raw.ringAt,
     rungAt: isTime(raw.rungAt) ? raw.rungAt : null,
+    landRungAt: isTime(raw.landRungAt) ? raw.landRungAt : null,
   };
 }
 
@@ -200,20 +204,30 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
   }
 
   /**
-   * Records that a timer rang. @returns {boolean} false if it had already rung,
-   * is gone, or `at` is not a time. Every write saves the whole blob, so two tabs
-   * marking different timers within a few milliseconds could still undo each
-   * other's mark: rings are claimed under one Web Lock shared by every timer
-   * (see alarm.js).
+   * Records a chime in `field` (rungAt or landRungAt). @returns {boolean} false
+   * if it had already rung, the timer is gone, or `at` is not a time. Every
+   * write saves the whole blob, so two tabs marking different timers within a
+   * few milliseconds could still undo each other's mark: chimes are claimed
+   * under one Web Lock shared by every timer (see alarm.js).
    */
-  function markRung(id, at) {
+  function mark(id, field, at) {
     if (!isTime(at)) return false;
     return update(() => {
       const timer = state.timers.find((t) => t.id === id);
-      if (!timer || timer.rungAt != null) return false;
-      timer.rungAt = at;
+      if (!timer || timer[field] != null) return false;
+      timer[field] = at;
       return true;
     });
+  }
+
+  /** Records that a timer's warning chime rang. @returns {boolean} see mark(). */
+  function markRung(id, at) {
+    return mark(id, 'rungAt', at);
+  }
+
+  /** Records that a timer's landing chime rang. @returns {boolean} see mark(). */
+  function markLanded(id, at) {
+    return mark(id, 'landRungAt', at);
   }
 
   /** Drops expired timers from storage. @returns {number} how many went. */
@@ -293,7 +307,7 @@ export function createStorage({ area = globalThis.localStorage, target = globalT
   }
 
   return {
-    getTimers, getTimer, addTimer, removeTimer, markRung, prune,
+    getTimers, getTimer, addTimer, removeTimer, markRung, markLanded, prune,
     getSetting, setSetting, reload, saved, subscribe, destroy,
   };
 }

@@ -25,8 +25,10 @@ function fakeAudio(clock, plays, { allowed = true } = {}) {
       audio.blocked = !audio.allowed;
       return audio.allowed;
     },
-    play() {
+    kinds: [],
+    play(kind) {
       plays.push(clock.now());
+      audio.kinds.push(kind);
       return true;
     },
     unlock() {
@@ -51,7 +53,7 @@ function tab({ area, clock, locks = null, allowed = true, holdMs = 0 }) {
   const win = fakeWin();
   const alarm = createAlarm({ storage, win, clock, locks, audio, holdMs });
   alarm.start();
-  return { storage, alarm, plays, audio, win };
+  return { storage, alarm, plays, kinds: audio.kinds, audio, win };
 }
 
 /** Moves time on in steps, letting promises settle between them. */
@@ -118,6 +120,7 @@ test('more than two minutes after the landing it marks the timer rung silently',
   await flush();
   assert.deepEqual(t.plays, []);
   assert.equal(t.storage.getTimer('1234567').rungAt, T0);
+  assert.equal(t.storage.getTimer('1234567').landRungAt, T0, 'the landing chime too');
 });
 
 test('up to two minutes after the landing it still chimes', async () => {
@@ -262,10 +265,13 @@ test('with nothing waiting there is no timer, no interval, and gestures do nothi
   assert.equal(t.audio.unlocks, 0);
   assert.equal(clock.pending(), 0);
   t.storage.addTimer(makeTimer());
-  assert.equal(clock.pending(), 2, 'the ring timeout and the 1 s check');
+  assert.equal(clock.pending(), 3, 'the warning and landing timeouts, and the 1 s check');
   clock.tick(25 * MIN);
   await flush();
-  assert.equal(clock.pending(), 0, 'all rung: back to nothing');
+  assert.equal(clock.pending(), 2, 'the warning rang; the landing chime and the 1 s check remain');
+  clock.tick(2 * MIN);
+  await flush();
+  assert.equal(clock.pending(), 0, 'both rung: back to nothing');
 });
 
 test('destroy cancels every timer, and a check already queued does nothing', async () => {
@@ -366,4 +372,56 @@ test('with the chime off there is no sound check and no unlock', async () => {
   t.win.dispatchEvent(new Event('pointerdown'));
   assert.equal(t.audio.readies, 0);
   assert.equal(t.audio.unlocks, 0);
+});
+
+test('the landing chime plays at the estimated landing, in its own sound', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer());
+  const t = tab({ area, clock, locks: fakeLocks() });
+  await run(clock, 25 * MIN, 1000);
+  assert.deepEqual(t.kinds, ['ring']);
+  await run(clock, 2 * MIN, 1000);
+  assert.deepEqual(t.kinds, ['ring', 'land']);
+  assert.deepEqual(t.plays, [T0 + 25 * MIN, T0 + 27 * MIN]);
+  assert.equal(t.storage.getTimer('1234567').landRungAt, T0 + 27 * MIN);
+});
+
+test('a warning and a landing due together give one landing chime', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer({ ringAt: T0 + 27 * MIN })); // a buffer of 0
+  const t = tab({ area, clock, locks: fakeLocks() });
+  await run(clock, 28 * MIN, 1000);
+  assert.deepEqual(t.kinds, ['land']);
+  const timer = t.storage.getTimer('1234567');
+  assert.equal(timer.rungAt, T0 + 27 * MIN);
+  assert.equal(timer.landRungAt, T0 + 27 * MIN);
+});
+
+test('two tabs, one warning and one landing chime between them', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const locks = fakeLocks();
+  seed(area, clock, makeTimer());
+  const a = tab({ area, clock, locks });
+  const b = tab({ area, clock, locks });
+  await run(clock, 27 * MIN + 10_000, 1000);
+  assert.deepEqual([...a.kinds, ...b.kinds].sort(), ['land', 'ring']);
+});
+
+test('a tab that may not play sound says so in the console, once', async () => {
+  resetWarnOnce();
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer());
+  const info = captureConsole('info');
+  try {
+    tab({ area, clock, locks: fakeLocks(), allowed: false });
+    await run(clock, 25 * MIN + 10_000, 1000);
+  } finally {
+    info.restore();
+  }
+  const said = info.calls.map((args) => args.join(' ')).filter((line) => /click/i.test(line));
+  assert.equal(said.length, 1, said.join(' | '));
 });

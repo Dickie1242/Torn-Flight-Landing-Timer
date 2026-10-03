@@ -141,7 +141,7 @@ test('Start saves the timer and the buffer, then closes', () => {
   p.start().click();
   assert.deepEqual(p.storage.getTimers(), [{
     id: '1234567', name: 'SomeName', destination: 'canada', plane: 'airstrip', direction: 'to',
-    minutes: 27, startedAt: T0, landingAt: T0 + 27 * MIN, ringAt: T0 + 24 * MIN, rungAt: null,
+    minutes: 27, startedAt: T0, landingAt: T0 + 27 * MIN, ringAt: T0 + 24 * MIN, rungAt: null, landRungAt: null,
   }]);
   assert.equal(p.storage.getSetting('bufferMin'), 3);
   assert.equal(p.panel.isOpen(), false);

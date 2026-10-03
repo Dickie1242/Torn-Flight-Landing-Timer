@@ -7,7 +7,7 @@ A userscript for [Torn City](https://www.torn.com) that puts a landing timer on 
 - **Rings early.** You choose how many minutes before the estimated landing it rings. The default is 2, and it remembers your last choice.
 - **Follows you around Torn.** A small box on every page counts down, turns red when it's time, and then counts on past the estimated landing.
 - **Several at once.** One row per player, soonest first.
-- **One chime.** A short chime plays in one Torn tab when a timer comes due. The 🔊 button mutes it.
+- **Two chimes, each played once in one Torn tab.** Three short beeps when a timer comes due, a few minutes before the estimated landing, then a rising four-note airport chime at the landing itself, so you can tell them apart. The 🔊 button mutes both.
 
 ## Rule safety
 
@@ -115,7 +115,8 @@ Run through this on `https://www.torn.com/` after installing a new build.
 
 - [ ] Someone flying: the button under their status is green; the panel shows the right country and plane, the times match the table, and the ring time is 2 minutes before landing.
 - [ ] Press Start, then go to another Torn page: the box is there and counting down.
-- [ ] Two Torn tabs open when a timer comes due: one chime, not two.
+- [ ] Two Torn tabs open when a timer comes due: one warning chime, not two; at the landing, one landing chime.
+- [ ] The landing chime sounds clearly different from the warning.
 - [ ] 🔊 mutes it in every tab; a timer comes due silently and its row still turns red.
 - [ ] Reload: the timers are still there.
 - [ ] Someone travelling disguised: the panel opens blank and Start waits for a country and plane.

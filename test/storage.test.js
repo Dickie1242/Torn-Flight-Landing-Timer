@@ -296,3 +296,23 @@ test('reload keeps a tab\'s own changes while saving fails', () => {
   }
   assert.equal(storage.getTimers().length, 1);
 });
+
+test('markLanded records the landing chime once, apart from the warning', () => {
+  const { storage } = fresh();
+  storage.addTimer(makeTimer());
+  assert.equal(storage.getTimer('1234567').landRungAt, null);
+  assert.equal(storage.markLanded('1234567', T0 + 27 * MIN), true);
+  assert.equal(storage.markLanded('1234567', T0 + 28 * MIN), false);
+  assert.equal(storage.markLanded('1234567', Number.NaN), false);
+  assert.equal(storage.markLanded('nobody', T0), false);
+  const timer = storage.getTimer('1234567');
+  assert.equal(timer.landRungAt, T0 + 27 * MIN);
+  assert.equal(timer.rungAt, null, 'the warning keeps its own mark');
+});
+
+test('a timer saved before the landing chime existed reads back with landRungAt null', () => {
+  const old = makeTimer();
+  delete old.landRungAt;
+  assert.equal(sanitizeTimer(old).landRungAt, null);
+  assert.equal(sanitizeTimer(makeTimer({ landRungAt: 'soon' })).landRungAt, null);
+});

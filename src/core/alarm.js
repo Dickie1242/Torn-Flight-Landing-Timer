@@ -1,15 +1,15 @@
 import { realClock } from './clock.js';
-import { safe, warnOnce } from './log.js';
+import { info, safe, warnOnce } from './log.js';
 import { createAudio } from './audio.js';
 
 /**
- * A ring found this long after the estimated landing (computer asleep, browser
- * closed) is marked rung silently: the chime would no longer be any use.
+ * A chime found this long after the estimated landing (computer asleep,
+ * browser closed) is marked rung silently: it would no longer be any use.
  */
 export const LATE_LIMIT_MS = 2 * 60 * 1000;
 
 /**
- * The Web Lock every Torn tab claims rings under. It is one lock for every
+ * The Web Lock every Torn tab claims chimes under. It is one lock for every
  * timer, so claims run one at a time: each storage write saves the whole store,
  * and two tabs marking different timers at the same moment could otherwise undo
  * each other's mark.
@@ -18,8 +18,8 @@ export const LOCK_NAME = 'landingtimer:ring';
 
 /**
  * How long the tab that chimed keeps the lock. localStorage reaches other tabs
- * a moment after a write, so holding on makes sure they see `rungAt` before
- * they can claim the same ring.
+ * a moment after a write, so holding on makes sure they see the mark before
+ * they can claim the same chime.
  */
 export const HOLD_MS = 5000;
 
@@ -31,25 +31,48 @@ const MAX_DELAY = 2 ** 31 - 1;
 /** Inputs that count as a user gesture: the moment a browser lets a page start sound. */
 const GESTURES = ['pointerdown', 'pointerup', 'keydown', 'touchend'];
 
-/** Is it too late for this timer's chime to be any use? */
+/**
+ * The two chimes every timer has: the warning, `ringAt` (the buffer before the
+ * estimated landing), and the landing itself, `landingAt`. Each has its own
+ * mark in storage and its own sound (see audio.js's CHIMES).
+ */
+const EVENTS = [
+  { kind: 'ring', at: (t) => t.ringAt, done: (t) => t.rungAt != null, mark: (s, id, at) => s.markRung(id, at) },
+  { kind: 'land', at: (t) => t.landingAt, done: (t) => t.landRungAt != null, mark: (s, id, at) => s.markLanded(id, at) },
+];
+
+/** Is it too late for this timer's chimes to be any use? */
 export function isLate(timer, now) {
   return now - timer.landingAt > LATE_LIMIT_MS;
 }
 
+/** Every chime still to play, as { timer, event }, or only those due by `now`. */
+function pendingChimes(timers, now = Infinity) {
+  const chimes = [];
+  for (const timer of timers) {
+    for (const event of EVENTS) {
+      if (!event.done(timer) && event.at(timer) <= now) chimes.push({ timer, event });
+    }
+  }
+  return chimes;
+}
+
 /**
- * Rings every timer once, in exactly one tab, at its ring time.
+ * Plays each timer's two chimes once, in exactly one tab, at their times.
  *
- * - **Scheduling.** Every tab aims one plain setTimeout at each timer that has
- *   not rung, and re-aims only timers that changed. Single timeouts escape
- *   Chrome's intensive throttling of chained timers in hidden tabs. While a
- *   timer is waiting, a 1 s check, focus, visibility changes and storage
- *   changes are the safety net.
- * - **Claiming.** Rings are claimed under one Web Lock and decided against a
- *   fresh read of storage. Every timer that is due rings together, with one
- *   chime.
- * - **Sound.** A timer is only marked rung once this tab has made sound, so a
- *   tab the browser won't let play leaves the ring to a tab that can, or to
- *   the player's next click here.
+ * - **Scheduling.** Every tab aims one plain setTimeout at each chime still to
+ *   play, and re-aims only chimes that changed. Single timeouts escape Chrome's
+ *   intensive throttling of chained timers in hidden tabs. While a chime is
+ *   waiting, a 1 s check, focus, visibility changes and storage changes are the
+ *   safety net.
+ * - **Claiming.** Chimes are claimed under one Web Lock and decided against a
+ *   fresh read of storage. Everything due plays together, as one chime: the
+ *   landing chime if anyone is landing, else the warning.
+ * - **Sound.** A chime is only marked once this tab has made sound, so a tab the
+ *   browser won't let play leaves it to a tab that can, or to the player's next
+ *   click here.
+ * - **Console.** Each decision is noted once in the console, so a missed chime
+ *   can be explained afterwards.
  */
 export function createAlarm({
   storage,
@@ -60,7 +83,7 @@ export function createAlarm({
   holdMs = HOLD_MS,
 }) {
   const doc = win ? win.document : null;
-  /** Timeouts aimed at each waiting timer's ring: id → { ringAt, handle }. */
+  /** Timeouts aimed at each waiting chime: `${id}:${kind}` → { at, handle }. */
   const scheduled = new Map();
   let interval = null;
   let unsubscribe = null;
@@ -70,36 +93,58 @@ export function createAlarm({
   let locksBroken = false;
   /** Whether this page has checked yet if it may play sound. */
   let probed = false;
+  /** Console notes already made on this page, so each is said once. */
+  const told = new Set();
 
-  const safePlay = safe('alarm.play', () => audio.play());
-
-  /** Timers that have not rung yet. */
-  function waiting() {
-    return storage.getTimers().filter((t) => t.rungAt == null);
+  function tellOnce(key, message) {
+    if (told.has(key)) return;
+    told.add(key);
+    info(message);
   }
 
-  /** Inside the lock: rings every timer that is due, with one chime for all of them. */
+  const names = (chimes) => [...new Set(chimes.map((c) => c.timer.name))].join(', ');
+
+  const safePlay = safe('alarm.play', (kind) => audio.play(kind));
+
+  function pending(now) {
+    return pendingChimes(storage.getTimers(), now);
+  }
+
+  /** Inside the lock: plays every chime that is due, as one sound. */
   async function ringDue() {
     storage.reload();
     const now = clock.now();
-    const due = waiting().filter((t) => t.ringAt <= now);
+    const due = pending(now);
     if (due.length === 0) return;
     // Decided on what is stored now: a mute in another tab a moment ago counts.
     const sound = !!storage.getSetting('sound');
     const audible = [];
-    let marked = 0;
-    for (const timer of due) {
-      if (sound && !isLate(timer, now)) audible.push(timer);
-      else if (storage.markRung(timer.id, now)) marked += 1;
+    const silent = [];
+    for (const chime of due) {
+      if (sound && !isLate(chime.timer, now)) audible.push(chime);
+      else if (chime.event.mark(storage, chime.timer.id, now)) silent.push(chime);
     }
-    // A tab that cannot make sound leaves an audible ring for one that can.
-    if (audible.length > 0 && (await audio.ready())) {
-      const rung = audible.filter((timer) => storage.markRung(timer.id, clock.now()));
-      if (rung.length > 0) safePlay();
-      marked += rung.length;
+    if (silent.length > 0) {
+      info(`marked without a sound (${sound ? 'too long after landing' : 'chime is off'}): ${names(silent)}`);
+    }
+    let rung = [];
+    if (audible.length > 0) {
+      if (await audio.ready()) {
+        rung = audible.filter((chime) => chime.event.mark(storage, chime.timer.id, clock.now()));
+        if (rung.length > 0) {
+          const landing = rung.some((chime) => chime.event.kind === 'land');
+          safePlay(landing ? 'land' : 'ring');
+          info(`chimed (${landing ? 'landing' : 'landing soon'}): ${names(rung)}`);
+        }
+      } else {
+        // A tab that cannot make sound leaves the chime for one that can.
+        tellOnce('blocked', 'a chime is due, but the browser has not let this page play sound yet: click anywhere on this page');
+      }
     }
     // Hold the lock while what this tab marked, silent or not, reaches the others.
-    if (marked > 0 && holdMs > 0) await new Promise((resolve) => clock.setTimeout(resolve, holdMs));
+    if (silent.length + rung.length > 0 && holdMs > 0) {
+      await new Promise((resolve) => clock.setTimeout(resolve, holdMs));
+    }
   }
 
   function retrySoon() {
@@ -115,7 +160,7 @@ export function createAlarm({
     if (locks && !locksBroken && typeof locks.request === 'function') {
       return locks.request(LOCK_NAME, { ifAvailable: true }, (lock) => {
         if (lock) return ringDue();
-        // Another tab is ringing, and holds the lock while its write spreads: look again soon.
+        // Another tab is chiming, and holds the lock while its write spreads: look again soon.
         retrySoon();
         return undefined;
       });
@@ -126,12 +171,15 @@ export function createAlarm({
   function check() {
     if (!started || claiming) return;
     const now = clock.now();
-    const due = waiting().filter((t) => t.ringAt <= now);
+    const due = pending(now);
     if (due.length === 0) return;
     const sound = !!storage.getSetting('sound');
-    const anySilent = due.some((t) => !sound || isLate(t, now));
-    // Only audible rings, and this tab has found it cannot play: wait for a click.
-    if (!anySilent && audio.isBlocked()) return;
+    const anySilent = due.some((chime) => !sound || isLate(chime.timer, now));
+    // Only audible chimes, and this tab has found it cannot play: wait for a click.
+    if (!anySilent && audio.isBlocked()) {
+      tellOnce('blocked', 'a chime is due, but the browser has not let this page play sound yet: click anywhere on this page');
+      return;
+    }
     claiming = true;
     let failed = false;
     let attempt;
@@ -152,10 +200,10 @@ export function createAlarm({
       })
       .finally(() => {
         claiming = false;
-        // A timer that came due while this tab was busy ringing: look again now,
+        // A chime that came due while this tab was busy chiming: look again now,
         // rather than at the next 1 s check, which a hidden tab may run late.
         // Not after a failure, though: that would retry in a tight loop.
-        if (!failed && started && !retryPending && waiting().some((t) => t.ringAt <= clock.now())) {
+        if (!failed && started && !retryPending && pending(clock.now()).length > 0) {
           clock.setTimeout(tick, 0);
         }
       });
@@ -163,25 +211,25 @@ export function createAlarm({
 
   const tick = safe('alarm.check', check);
 
-  function reschedule(timers) {
+  function reschedule(chimes) {
     const now = clock.now();
-    const wanted = new Map(timers.map((t) => [t.id, t.ringAt]));
-    for (const [id, entry] of scheduled) {
-      if (wanted.get(id) === entry.ringAt) continue;
+    const wanted = new Map(chimes.map((c) => [`${c.timer.id}:${c.event.kind}`, c.event.at(c.timer)]));
+    for (const [key, entry] of scheduled) {
+      if (wanted.get(key) === entry.at) continue;
       clock.clearTimeout(entry.handle);
-      scheduled.delete(id);
+      scheduled.delete(key);
     }
-    for (const [id, ringAt] of wanted) {
-      if (scheduled.has(id)) continue;
+    for (const [key, at] of wanted) {
+      if (scheduled.has(key)) continue;
       const handle = clock.setTimeout(() => {
-        scheduled.delete(id);
+        scheduled.delete(key);
         tick();
-      }, Math.min(MAX_DELAY, Math.max(0, ringAt - now)));
-      scheduled.set(id, { ringAt, handle });
+      }, Math.min(MAX_DELAY, Math.max(0, at - now)));
+      scheduled.set(key, { at, handle });
     }
   }
 
-  /** The 1 s safety net runs only while some timer is still to ring. */
+  /** The 1 s safety net runs only while some chime is still to play. */
   function syncInterval(active) {
     if (active && interval === null) {
       interval = clock.setInterval(tick, 1000);
@@ -192,12 +240,12 @@ export function createAlarm({
   }
 
   const onChange = safe('alarm.reschedule', () => {
-    const timers = waiting();
-    reschedule(timers);
-    syncInterval(timers.length > 0);
-    // With a timer waiting, find out once whether this tab can play, so the
-    // "click to allow" hint shows long before the ring rather than at it.
-    if (timers.length > 0 && !probed && storage.getSetting('sound')) {
+    const chimes = pending();
+    reschedule(chimes);
+    syncInterval(chimes.length > 0);
+    // With a chime waiting, find out once whether this tab can play, so the
+    // "click to allow" hint shows long before the chime rather than at it.
+    if (chimes.length > 0 && !probed && storage.getSetting('sound')) {
       probed = true;
       Promise.resolve(audio.ready()).catch(() => {});
     }
@@ -208,9 +256,10 @@ export function createAlarm({
   const onGesture = safe('alarm.gesture', () => {
     // With the chime off there is no sound to start.
     if (!storage.getSetting('sound')) return;
-    if (waiting().length === 0) {
-      // Nothing to ring, but a tab found blocked earlier must not keep its
-      // "click to allow" hint: the click is the permission, timer or not.
+    if (audio.isBlocked()) told.delete('blocked');
+    if (pending().length === 0) {
+      // Nothing to play, but a tab found blocked earlier must not keep its
+      // "click to allow" hint: the click is the permission, chime or not.
       if (audio.isBlocked()) audio.unlock();
       return;
     }

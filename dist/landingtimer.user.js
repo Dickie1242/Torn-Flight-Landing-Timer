@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Landing Timer
 // @namespace    landingtimer.torn
-// @version      1.0.0
-// @description  A landing countdown on Torn profiles: reads the destination and plane from the profile you are viewing, shows every flight time, and chimes a few minutes before they land. Makes no network requests.
+// @version      1.1.0
+// @description  A landing countdown on Torn profiles: reads the destination and plane from the profile you are viewing, shows every flight time, and chimes a few minutes before they land, then again as they land. Makes no network requests.
 // @license      MIT
 // @match        https://www.torn.com/*
 // @run-at       document-idle
@@ -236,7 +236,7 @@
 `;
 
   // src/core/version.js
-  var VERSION = true ? "1.0.0" : "dev";
+  var VERSION = true ? "1.1.0" : "dev";
   var VERSION_ATTR = "data-landingtimer-version";
 
   // src/core/styles.js
@@ -371,7 +371,8 @@
       startedAt: raw.startedAt,
       landingAt: raw.landingAt,
       ringAt: raw.ringAt,
-      rungAt: isTime(raw.rungAt) ? raw.rungAt : null
+      rungAt: isTime(raw.rungAt) ? raw.rungAt : null,
+      landRungAt: isTime(raw.landRungAt) ? raw.landRungAt : null
     };
   }
   function emptyState() {
@@ -462,14 +463,20 @@
         return true;
       });
     }
-    function markRung(id, at) {
+    function mark(id, field, at) {
       if (!isTime(at)) return false;
       return update(() => {
         const timer = state.timers.find((t) => t.id === id);
-        if (!timer || timer.rungAt != null) return false;
-        timer.rungAt = at;
+        if (!timer || timer[field] != null) return false;
+        timer[field] = at;
         return true;
       });
+    }
+    function markRung(id, at) {
+      return mark(id, "rungAt", at);
+    }
+    function markLanded(id, at) {
+      return mark(id, "landRungAt", at);
     }
     function prune() {
       if (state.timers.every(live)) return 0;
@@ -535,6 +542,7 @@
       addTimer,
       removeTimer,
       markRung,
+      markLanded,
       prune,
       getSetting,
       setSetting,
@@ -547,6 +555,10 @@
 
   // src/core/audio.js
   var READY_TIMEOUT_MS = 300;
+  var CHIMES = Object.freeze({
+    ring: Object.freeze({ wave: "sine", notes: Object.freeze([880, 880, 880]), step: 0.45, length: 0.35 }),
+    land: Object.freeze({ wave: "triangle", notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]), step: 0.28, length: 0.7 })
+  });
   function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT_MS } = {}) {
     let context = null;
     let blocked = false;
@@ -595,24 +607,25 @@
       blocked = ctx.state !== "running";
       return !blocked;
     }
-    function play() {
+    function play(kind = "ring") {
       const ctx = getContext();
       if (!ctx || ctx.state !== "running") return false;
+      const chime = Object.hasOwn(CHIMES, kind) ? CHIMES[kind] : CHIMES.ring;
       const start = ctx.currentTime + 0.05;
-      for (let i = 0; i < 3; i += 1) {
-        const at = start + i * 0.45;
+      chime.notes.forEach((frequency, i) => {
+        const at = start + i * chime.step;
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = 880;
+        osc.type = chime.wave;
+        osc.frequency.value = frequency;
         gain.gain.setValueAtTime(1e-4, at);
         gain.gain.exponentialRampToValueAtTime(0.3, at + 0.02);
-        gain.gain.exponentialRampToValueAtTime(1e-4, at + 0.35);
+        gain.gain.exponentialRampToValueAtTime(1e-4, at + chime.length);
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start(at);
-        osc.stop(at + 0.4);
-      }
+        osc.stop(at + chime.length + 0.05);
+      });
       return true;
     }
     function isBlocked() {
@@ -631,8 +644,21 @@
   var RETRY_MS = 500;
   var MAX_DELAY = 2 ** 31 - 1;
   var GESTURES = ["pointerdown", "pointerup", "keydown", "touchend"];
+  var EVENTS = [
+    { kind: "ring", at: (t) => t.ringAt, done: (t) => t.rungAt != null, mark: (s, id, at) => s.markRung(id, at) },
+    { kind: "land", at: (t) => t.landingAt, done: (t) => t.landRungAt != null, mark: (s, id, at) => s.markLanded(id, at) }
+  ];
   function isLate(timer, now) {
     return now - timer.landingAt > LATE_LIMIT_MS;
+  }
+  function pendingChimes(timers, now = Infinity) {
+    const chimes = [];
+    for (const timer of timers) {
+      for (const event of EVENTS) {
+        if (!event.done(timer) && event.at(timer) <= now) chimes.push({ timer, event });
+      }
+    }
+    return chimes;
   }
   function createAlarm({
     storage,
@@ -651,28 +677,48 @@
     let retryPending = false;
     let locksBroken = false;
     let probed = false;
-    const safePlay = safe("alarm.play", () => audio.play());
-    function waiting() {
-      return storage.getTimers().filter((t) => t.rungAt == null);
+    const told = /* @__PURE__ */ new Set();
+    function tellOnce(key, message) {
+      if (told.has(key)) return;
+      told.add(key);
+      info(message);
+    }
+    const names = (chimes) => [...new Set(chimes.map((c) => c.timer.name))].join(", ");
+    const safePlay = safe("alarm.play", (kind) => audio.play(kind));
+    function pending(now) {
+      return pendingChimes(storage.getTimers(), now);
     }
     async function ringDue() {
       storage.reload();
       const now = clock.now();
-      const due = waiting().filter((t) => t.ringAt <= now);
+      const due = pending(now);
       if (due.length === 0) return;
       const sound = !!storage.getSetting("sound");
       const audible = [];
-      let marked = 0;
-      for (const timer of due) {
-        if (sound && !isLate(timer, now)) audible.push(timer);
-        else if (storage.markRung(timer.id, now)) marked += 1;
+      const silent = [];
+      for (const chime of due) {
+        if (sound && !isLate(chime.timer, now)) audible.push(chime);
+        else if (chime.event.mark(storage, chime.timer.id, now)) silent.push(chime);
       }
-      if (audible.length > 0 && await audio.ready()) {
-        const rung = audible.filter((timer) => storage.markRung(timer.id, clock.now()));
-        if (rung.length > 0) safePlay();
-        marked += rung.length;
+      if (silent.length > 0) {
+        info(`marked without a sound (${sound ? "too long after landing" : "chime is off"}): ${names(silent)}`);
       }
-      if (marked > 0 && holdMs > 0) await new Promise((resolve) => clock.setTimeout(resolve, holdMs));
+      let rung = [];
+      if (audible.length > 0) {
+        if (await audio.ready()) {
+          rung = audible.filter((chime) => chime.event.mark(storage, chime.timer.id, clock.now()));
+          if (rung.length > 0) {
+            const landing = rung.some((chime) => chime.event.kind === "land");
+            safePlay(landing ? "land" : "ring");
+            info(`chimed (${landing ? "landing" : "landing soon"}): ${names(rung)}`);
+          }
+        } else {
+          tellOnce("blocked", "a chime is due, but the browser has not let this page play sound yet: click anywhere on this page");
+        }
+      }
+      if (silent.length + rung.length > 0 && holdMs > 0) {
+        await new Promise((resolve) => clock.setTimeout(resolve, holdMs));
+      }
     }
     function retrySoon() {
       if (retryPending) return;
@@ -695,11 +741,14 @@
     function check() {
       if (!started || claiming) return;
       const now = clock.now();
-      const due = waiting().filter((t) => t.ringAt <= now);
+      const due = pending(now);
       if (due.length === 0) return;
       const sound = !!storage.getSetting("sound");
-      const anySilent = due.some((t) => !sound || isLate(t, now));
-      if (!anySilent && audio.isBlocked()) return;
+      const anySilent = due.some((chime) => !sound || isLate(chime.timer, now));
+      if (!anySilent && audio.isBlocked()) {
+        tellOnce("blocked", "a chime is due, but the browser has not let this page play sound yet: click anywhere on this page");
+        return;
+      }
       claiming = true;
       let failed = false;
       let attempt;
@@ -717,27 +766,27 @@
         }
       }).finally(() => {
         claiming = false;
-        if (!failed && started && !retryPending && waiting().some((t) => t.ringAt <= clock.now())) {
+        if (!failed && started && !retryPending && pending(clock.now()).length > 0) {
           clock.setTimeout(tick, 0);
         }
       });
     }
     const tick = safe("alarm.check", check);
-    function reschedule(timers) {
+    function reschedule(chimes) {
       const now = clock.now();
-      const wanted = new Map(timers.map((t) => [t.id, t.ringAt]));
-      for (const [id, entry] of scheduled) {
-        if (wanted.get(id) === entry.ringAt) continue;
+      const wanted = new Map(chimes.map((c) => [`${c.timer.id}:${c.event.kind}`, c.event.at(c.timer)]));
+      for (const [key, entry] of scheduled) {
+        if (wanted.get(key) === entry.at) continue;
         clock.clearTimeout(entry.handle);
-        scheduled.delete(id);
+        scheduled.delete(key);
       }
-      for (const [id, ringAt] of wanted) {
-        if (scheduled.has(id)) continue;
+      for (const [key, at] of wanted) {
+        if (scheduled.has(key)) continue;
         const handle = clock.setTimeout(() => {
-          scheduled.delete(id);
+          scheduled.delete(key);
           tick();
-        }, Math.min(MAX_DELAY, Math.max(0, ringAt - now)));
-        scheduled.set(id, { ringAt, handle });
+        }, Math.min(MAX_DELAY, Math.max(0, at - now)));
+        scheduled.set(key, { at, handle });
       }
     }
     function syncInterval(active) {
@@ -749,10 +798,10 @@
       }
     }
     const onChange = safe("alarm.reschedule", () => {
-      const timers = waiting();
-      reschedule(timers);
-      syncInterval(timers.length > 0);
-      if (timers.length > 0 && !probed && storage.getSetting("sound")) {
+      const chimes = pending();
+      reschedule(chimes);
+      syncInterval(chimes.length > 0);
+      if (chimes.length > 0 && !probed && storage.getSetting("sound")) {
         probed = true;
         Promise.resolve(audio.ready()).catch(() => {
         });
@@ -761,7 +810,8 @@
     });
     const onGesture = safe("alarm.gesture", () => {
       if (!storage.getSetting("sound")) return;
-      if (waiting().length === 0) {
+      if (audio.isBlocked()) told.delete("blocked");
+      if (pending().length === 0) {
         if (audio.isBlocked()) audio.unlock();
         return;
       }

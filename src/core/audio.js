@@ -8,6 +8,17 @@
 /** How long ready() waits for a held-back context to start. */
 export const READY_TIMEOUT_MS = 300;
 
+/**
+ * The two chimes. The warning, a few minutes before landing, is three equal
+ * beeps. The landing itself is a rising four-note airport chime, in a softer
+ * voice, so the two can't be mistaken for each other.
+ * `step` is the seconds between notes; `length` is how long each one rings.
+ */
+export const CHIMES = Object.freeze({
+  ring: Object.freeze({ wave: 'sine', notes: Object.freeze([880, 880, 880]), step: 0.45, length: 0.35 }),
+  land: Object.freeze({ wave: 'triangle', notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]), step: 0.28, length: 0.7 }),
+});
+
 export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT_MS } = {}) {
   let context = null;
   /** A ready() found this tab unable to play, and no gesture has come since. */
@@ -73,25 +84,26 @@ export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT
     return !blocked;
   }
 
-  /** Plays the chime. @returns {boolean} whether it could. */
-  function play() {
+  /** Plays a chime: 'ring' (the warning, the default) or 'land'. @returns {boolean} whether it could. */
+  function play(kind = 'ring') {
     const ctx = getContext();
     if (!ctx || ctx.state !== 'running') return false;
+    const chime = Object.hasOwn(CHIMES, kind) ? CHIMES[kind] : CHIMES.ring;
     const start = ctx.currentTime + 0.05;
-    for (let i = 0; i < 3; i += 1) {
-      const at = start + i * 0.45;
+    chime.notes.forEach((frequency, i) => {
+      const at = start + i * chime.step;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 880;
+      osc.type = chime.wave;
+      osc.frequency.value = frequency;
       gain.gain.setValueAtTime(0.0001, at);
       gain.gain.exponentialRampToValueAtTime(0.3, at + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + chime.length);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(at);
-      osc.stop(at + 0.4);
-    }
+      osc.stop(at + chime.length + 0.05);
+    });
     return true;
   }
 

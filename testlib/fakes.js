@@ -135,6 +135,7 @@ export function makeTimer(overrides = {}) {
     landingAt: T0 + 27 * MIN,
     ringAt: T0 + 25 * MIN,
     rungAt: null,
+    landRungAt: null,
     ...overrides,
   };
 }

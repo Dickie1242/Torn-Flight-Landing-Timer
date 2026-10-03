@@ -213,8 +213,15 @@ It is on every Torn page and hidden while there are no timers.
   Audio (`audio.js`).
 - **The switch:** 🔊 toggles `settings.sound`, which is shared by all tabs.
   Default on.
-- **When:** each timer chimes **once, in exactly one tab**, at `ringAt`.
-  Timers that come due together share one chime.
+- **When:** each timer has two chimes, each played **once, in exactly one
+  tab**: the warning at `ringAt` (three equal beeps) and the landing at
+  `landingAt` (a rising four-note airport chime, in a softer voice). Each has
+  its own mark in storage (`rungAt`, `landRungAt`). Chimes that come due
+  together play as one: the landing chime if anyone is landing, else the
+  warning. With a buffer of 0 that means a single landing chime.
+- **Console:** each decision (chimed, marked silently and why, held back
+  because the page may not play sound) is noted once in the console as
+  `[Landing Timer] …`, so a missed chime can be explained afterwards.
 - **Scheduling:**
   - Every tab aims one plain `setTimeout` at each timer that hasn't rung, and
     re-aims only the timers that changed. Single, unchained timeouts avoid
@@ -254,7 +261,7 @@ There is one `localStorage` key, `landingtimer.v1`, holding:
 {
   version: 1,
   timers: [{ id, name, destination, plane, direction,
-             minutes, startedAt, landingAt, ringAt, rungAt }],
+             minutes, startedAt, landingAt, ringAt, rungAt, landRungAt }],
   settings: { bufferMin: 2, sound: true, widgetPos: null }
 }
 ```
