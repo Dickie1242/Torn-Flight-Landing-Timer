@@ -3,7 +3,13 @@ export const PREFIX = '[Landing Timer]';
 const warned = new Set();
 
 export function info(...args) {
-  console.info(PREFIX, ...args);
+  // A page that has broken console.info must not break the caller (the alarm
+  // notes a chime between marking it and holding its lock).
+  try {
+    console.info(PREFIX, ...args);
+  } catch {
+    // Nothing to do: the note is lost, the work goes on.
+  }
 }
 
 /**

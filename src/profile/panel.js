@@ -177,6 +177,7 @@ export function createPanel({ doc = globalThis.document, storage, clock = realCl
       direction: status.direction || (status.state === 'abroad' ? 'from' : null),
       ...plan,
       rungAt: null,
+      landRungAt: null,
     });
     // Never lose a timer quietly: stay open so the player knows.
     if (!timer) {

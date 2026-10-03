@@ -1,8 +1,8 @@
 /**
- * The chime: three short beeps synthesised with Web Audio, so there is no
- * sound file and no request. Browsers only let a page start sound after the
- * player has interacted with it, so this also knows whether sound works in
- * this tab, and starts it on a real click.
+ * The two chimes, synthesised with Web Audio, so there is no sound file and no
+ * request. Browsers only let a page start sound after the player has
+ * interacted with it, so this also knows whether sound works in this tab, and
+ * starts it on a real click.
  */
 
 /** How long ready() waits for a held-back context to start. */
@@ -10,13 +10,20 @@ export const READY_TIMEOUT_MS = 300;
 
 /**
  * The two chimes. The warning, a few minutes before landing, is three equal
- * beeps. The landing itself is a rising four-note airport chime, in a softer
- * voice, so the two can't be mistaken for each other.
- * `step` is the seconds between notes; `length` is how long each one rings.
+ * beeps. The landing itself is a rising four-note airport chime in a different
+ * voice, a little louder since landing is the moment to act, whose notes ring
+ * on into each other like a bell, so the two can't be mistaken for each other.
+ * - `step`: seconds between notes; `length`: how long each note sounds.
+ * - `peak`: each note's loudness (0–1). Even overlapping, the landing chime
+ *   stays near 0.5, well clear of clipping.
+ * - `tail`: when set, a note fades like a bell, with this time constant in
+ *   seconds, instead of stopping short.
  */
 export const CHIMES = Object.freeze({
-  ring: Object.freeze({ wave: 'sine', notes: Object.freeze([880, 880, 880]), step: 0.45, length: 0.35 }),
-  land: Object.freeze({ wave: 'triangle', notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]), step: 0.28, length: 0.7 }),
+  ring: Object.freeze({ wave: 'sine', notes: Object.freeze([880, 880, 880]), step: 0.45, length: 0.35, peak: 0.3 }),
+  land: Object.freeze({
+    wave: 'triangle', notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]), step: 0.28, length: 1.2, peak: 0.35, tail: 0.25,
+  }),
 });
 
 export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT_MS } = {}) {
@@ -97,8 +104,9 @@ export function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT
       osc.type = chime.wave;
       osc.frequency.value = frequency;
       gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.3, at + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + chime.length);
+      gain.gain.exponentialRampToValueAtTime(chime.peak, at + 0.02);
+      if (chime.tail) gain.gain.setTargetAtTime(0.0001, at + 0.02, chime.tail);
+      else gain.gain.exponentialRampToValueAtTime(0.0001, at + chime.length);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(at);

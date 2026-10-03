@@ -207,51 +207,60 @@ It is on every Torn page and hidden while there are no timers.
   starts at top-right, 16 px from the right edge and 120 px down. Its z-index
   sits above Torn's and Chat+'s chat boxes.
 
-### 5.4 Chime (`src/core/alarm.js`, `src/core/audio.js`)
+### 5.4 Chimes (`src/core/alarm.js`, `src/core/audio.js`)
 
-- **The sound:** three short beeps, about 1.5 s in total, synthesised with Web
-  Audio (`audio.js`).
-- **The switch:** 🔊 toggles `settings.sound`, which is shared by all tabs.
-  Default on.
-- **When:** each timer has two chimes, each played **once, in exactly one
-  tab**: the warning at `ringAt` (three equal beeps) and the landing at
-  `landingAt` (a rising four-note airport chime, in a softer voice). Each has
-  its own mark in storage (`rungAt`, `landRungAt`). Chimes that come due
-  together play as one: the landing chime if anyone is landing, else the
-  warning. With a buffer of 0 that means a single landing chime.
-- **Console:** each decision (chimed, marked silently and why, held back
-  because the page may not play sound) is noted once in the console as
-  `[Landing Timer] …`, so a missed chime can be explained afterwards.
+- **The sounds:** synthesised with Web Audio (`audio.js`), with no sound file.
+  The warning is three equal 880 Hz beeps, about 1.5 s in all. The landing
+  chime is a rising four-note airport chime (C5–E5–G5–C6) in a triangle voice
+  whose notes ring on into each other like a bell, about 2 s in all, a little
+  louder than the warning.
+- **The switch:** 🔊 toggles `settings.sound`, which is shared by all tabs and
+  mutes both chimes. Default on.
+- **When:**
+  - Each timer has two chimes, each played **once, in exactly one tab**: the
+    warning at `ringAt` and the landing at `landingAt`.
+  - Each chime has its own mark in storage (`rungAt`, `landRungAt`).
+  - Chimes that come due together play as one sound: the landing chime if
+    anyone is landing, else the warning. With a buffer of 0 that means a single
+    landing chime.
+- **Console:** each decision is noted once in the console as
+  `[Landing Timer] …`: chimed, no sound and why, or held back because the page
+  may not play sound. The notes count chimes and never name players, since
+  pages can collect what the console says.
 - **Scheduling:**
-  - Every tab aims one plain `setTimeout` at each timer that hasn't rung, and
-    re-aims only the timers that changed. Single, unchained timeouts avoid
+  - Every tab aims one plain `setTimeout` at each chime still to play, and
+    re-aims only the chimes that changed. Single, unchained timeouts avoid
     Chrome's intensive throttling of hidden tabs.
-  - While a timer is waiting, a 1 s check, `visibilitychange`, `focus` and
+  - While a chime is waiting, a 1 s check, `visibilitychange`, `focus` and
     storage changes re-check as a safety net.
   - With nothing waiting, the alarm does nothing.
 - **Exactly once:**
-  - Rings are claimed with `navigator.locks.request('landingtimer:ring',
+  - Chimes are claimed with `navigator.locks.request('landingtimer:ring',
     { ifAvailable: true })`, one lock for every timer.
-  - Inside the lock the tab re-reads storage, rings every due timer that is
-    still unrung, then holds the lock for 5 s so its write reaches the other
+  - Inside the lock the tab re-reads storage and plays every due chime that is
+    still unmarked. It then holds the lock for 5 s so its marks reach the other
     tabs first.
   - A tab that finds the lock busy looks again 500 ms later.
+  - A page also remembers every mark it has seen. A tab still running 1.0.0
+    drops `landRungAt` when it writes, so this stops it making a landing chime
+    play again. After an update, reload open Torn tabs.
 - **Which tab:**
   - Browsers only let a tab play sound after the player has clicked in it. A
-    timer is marked rung only once this tab has actually started its audio.
-  - A tab that can't play leaves the ring for one that can, or for the next
-    click in this one: a click starts the audio and re-checks at once.
-  - With a timer waiting and the chime on, the tab checks once whether it may
+    chime is marked only once this tab has actually started its audio.
+  - A tab that can't play leaves the chime for one that can, or for the next
+    click in this one. A click starts the audio and re-checks at once.
+  - With a chime waiting and the sound on, the tab checks once whether it may
     play. While it is known to be blocked, the 🔊 icon shows as 🔇 with the
-    tooltip "Click anywhere on this page to allow the chime". Any click on the
-    page clears it, and clicking the icon itself counts as that click; it does
-    not mute. With the chime off, no sound is started at all.
+    tooltip "Click anywhere on this page to allow the chime".
+  - Any click on the page clears the hint. Clicking the icon itself counts as
+    that click; it does not mute.
+  - With the chime off, no sound is started at all.
 - **Late:** if more than 2 minutes have passed since the estimated landing
-  (computer asleep, browser closed), the timer is marked rung without a sound.
-  A big buffer therefore still chimes late, up to the landing. The row still
-  shows red.
-- **Sound off:** the timer is marked rung silently. The setting is read
-  afresh inside the lock, so a mute in another tab counts at once.
+  (computer asleep, browser closed), each chime still unplayed is marked
+  without a sound. A big buffer therefore still chimes late, up to the landing.
+  The row still shows red.
+- **Sound off:** each chime is marked silently. The setting is read afresh
+  inside the lock, so a mute in another tab counts at once.
 
 ## 6. Storage (`src/core/storage.js`)
 

@@ -64,7 +64,10 @@
   var PREFIX = "[Landing Timer]";
   var warned = /* @__PURE__ */ new Set();
   function info(...args) {
-    console.info(PREFIX, ...args);
+    try {
+      console.info(PREFIX, ...args);
+    } catch {
+    }
   }
   function warnOnce(key, ...args) {
     if (warned.has(key)) return false;
@@ -556,8 +559,15 @@
   // src/core/audio.js
   var READY_TIMEOUT_MS = 300;
   var CHIMES = Object.freeze({
-    ring: Object.freeze({ wave: "sine", notes: Object.freeze([880, 880, 880]), step: 0.45, length: 0.35 }),
-    land: Object.freeze({ wave: "triangle", notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]), step: 0.28, length: 0.7 })
+    ring: Object.freeze({ wave: "sine", notes: Object.freeze([880, 880, 880]), step: 0.45, length: 0.35, peak: 0.3 }),
+    land: Object.freeze({
+      wave: "triangle",
+      notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]),
+      step: 0.28,
+      length: 1.2,
+      peak: 0.35,
+      tail: 0.25
+    })
   });
   function createAudio({ win = globalThis.window, timeoutMs = READY_TIMEOUT_MS } = {}) {
     let context = null;
@@ -619,8 +629,9 @@
         osc.type = chime.wave;
         osc.frequency.value = frequency;
         gain.gain.setValueAtTime(1e-4, at);
-        gain.gain.exponentialRampToValueAtTime(0.3, at + 0.02);
-        gain.gain.exponentialRampToValueAtTime(1e-4, at + chime.length);
+        gain.gain.exponentialRampToValueAtTime(chime.peak, at + 0.02);
+        if (chime.tail) gain.gain.setTargetAtTime(1e-4, at + 0.02, chime.tail);
+        else gain.gain.exponentialRampToValueAtTime(1e-4, at + chime.length);
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start(at);
@@ -678,15 +689,26 @@
     let locksBroken = false;
     let probed = false;
     const told = /* @__PURE__ */ new Set();
+    const seenDone = /* @__PURE__ */ new Set();
+    const chimeKey = (timer, event) => `${timer.id}:${event.kind}:${event.at(timer)}`;
     function tellOnce(key, message) {
       if (told.has(key)) return;
       told.add(key);
       info(message);
     }
-    const names = (chimes) => [...new Set(chimes.map((c) => c.timer.name))].join(", ");
+    function describe(chimes) {
+      const landing = chimes.filter((c) => c.event.kind === "land").length;
+      const soon = chimes.length - landing;
+      return [landing && `${landing} landing`, soon && `${soon} landing soon`].filter(Boolean).join(", ");
+    }
+    const BLOCKED_NOTE = "a chime is due, but the browser has not let this page play sound yet: click anywhere on this page (or another open Torn tab will play it)";
     const safePlay = safe("alarm.play", (kind) => audio.play(kind));
     function pending(now) {
-      return pendingChimes(storage.getTimers(), now);
+      const timers = storage.getTimers();
+      for (const timer of timers) {
+        for (const event of EVENTS) if (event.done(timer)) seenDone.add(chimeKey(timer, event));
+      }
+      return pendingChimes(timers, now).filter((c) => !seenDone.has(chimeKey(c.timer, c.event)));
     }
     async function ringDue() {
       storage.reload();
@@ -701,19 +723,19 @@
         else if (chime.event.mark(storage, chime.timer.id, now)) silent.push(chime);
       }
       if (silent.length > 0) {
-        info(`marked without a sound (${sound ? "too long after landing" : "chime is off"}): ${names(silent)}`);
+        info(`no sound (${sound ? "landed over 2 minutes ago" : "chime is off"}): ${describe(silent)}`);
       }
       let rung = [];
       if (audible.length > 0) {
         if (await audio.ready()) {
+          told.delete("blocked");
           rung = audible.filter((chime) => chime.event.mark(storage, chime.timer.id, clock.now()));
           if (rung.length > 0) {
-            const landing = rung.some((chime) => chime.event.kind === "land");
-            safePlay(landing ? "land" : "ring");
-            info(`chimed (${landing ? "landing" : "landing soon"}): ${names(rung)}`);
+            safePlay(rung.some((chime) => chime.event.kind === "land") ? "land" : "ring");
+            info(`chimed: ${describe(rung)}`);
           }
         } else {
-          tellOnce("blocked", "a chime is due, but the browser has not let this page play sound yet: click anywhere on this page");
+          tellOnce("blocked", BLOCKED_NOTE);
         }
       }
       if (silent.length + rung.length > 0 && holdMs > 0) {
@@ -746,7 +768,7 @@
       const sound = !!storage.getSetting("sound");
       const anySilent = due.some((chime) => !sound || isLate(chime.timer, now));
       if (!anySilent && audio.isBlocked()) {
-        tellOnce("blocked", "a chime is due, but the browser has not let this page play sound yet: click anywhere on this page");
+        tellOnce("blocked", BLOCKED_NOTE);
         return;
       }
       claiming = true;
@@ -810,7 +832,6 @@
     });
     const onGesture = safe("alarm.gesture", () => {
       if (!storage.getSetting("sound")) return;
-      if (audio.isBlocked()) told.delete("blocked");
       if (pending().length === 0) {
         if (audio.isBlocked()) audio.unlock();
         return;
@@ -1486,7 +1507,8 @@
         // From abroad the only flight there is goes home.
         direction: status.direction || (status.state === "abroad" ? "from" : null),
         ...plan,
-        rungAt: null
+        rungAt: null,
+        landRungAt: null
       });
       if (!timer) {
         parts.error.textContent = "Could not save this timer.";

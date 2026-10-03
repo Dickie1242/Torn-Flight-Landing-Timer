@@ -220,7 +220,7 @@ test('smoke: the chime is wired: a timer that is due chimes once and is marked r
         }
 
         createGain() {
-          return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} };
+          return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {}, setTargetAtTime() {} }, connect() {} };
         }
       };
     },

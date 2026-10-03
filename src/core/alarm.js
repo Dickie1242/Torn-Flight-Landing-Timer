@@ -95,6 +95,14 @@ export function createAlarm({
   let probed = false;
   /** Console notes already made on this page, so each is said once. */
   const told = new Set();
+  /**
+   * Chimes this page has seen marked, keyed with their time. A writer that
+   * drops a mark (a tab still running 1.0.0, which knows nothing of
+   * landRungAt) then cannot make one play again. The time in the key lets a
+   * fresh Start on the same player through.
+   */
+  const seenDone = new Set();
+  const chimeKey = (timer, event) => `${timer.id}:${event.kind}:${event.at(timer)}`;
 
   function tellOnce(key, message) {
     if (told.has(key)) return;
@@ -102,12 +110,27 @@ export function createAlarm({
     info(message);
   }
 
-  const names = (chimes) => [...new Set(chimes.map((c) => c.timer.name))].join(', ');
+  /**
+   * "1 landing, 2 landing soon": counts, never names. Pages can collect what
+   * the console says, and which players someone tracks is theirs alone.
+   */
+  function describe(chimes) {
+    const landing = chimes.filter((c) => c.event.kind === 'land').length;
+    const soon = chimes.length - landing;
+    return [landing && `${landing} landing`, soon && `${soon} landing soon`].filter(Boolean).join(', ');
+  }
+
+  const BLOCKED_NOTE = 'a chime is due, but the browser has not let this page play sound yet: '
+    + 'click anywhere on this page (or another open Torn tab will play it)';
 
   const safePlay = safe('alarm.play', (kind) => audio.play(kind));
 
   function pending(now) {
-    return pendingChimes(storage.getTimers(), now);
+    const timers = storage.getTimers();
+    for (const timer of timers) {
+      for (const event of EVENTS) if (event.done(timer)) seenDone.add(chimeKey(timer, event));
+    }
+    return pendingChimes(timers, now).filter((c) => !seenDone.has(chimeKey(c.timer, c.event)));
   }
 
   /** Inside the lock: plays every chime that is due, as one sound. */
@@ -125,20 +148,21 @@ export function createAlarm({
       else if (chime.event.mark(storage, chime.timer.id, now)) silent.push(chime);
     }
     if (silent.length > 0) {
-      info(`marked without a sound (${sound ? 'too long after landing' : 'chime is off'}): ${names(silent)}`);
+      info(`no sound (${sound ? 'landed over 2 minutes ago' : 'chime is off'}): ${describe(silent)}`);
     }
     let rung = [];
     if (audible.length > 0) {
       if (await audio.ready()) {
+        // Sound works here: a later block is worth saying again.
+        told.delete('blocked');
         rung = audible.filter((chime) => chime.event.mark(storage, chime.timer.id, clock.now()));
         if (rung.length > 0) {
-          const landing = rung.some((chime) => chime.event.kind === 'land');
-          safePlay(landing ? 'land' : 'ring');
-          info(`chimed (${landing ? 'landing' : 'landing soon'}): ${names(rung)}`);
+          safePlay(rung.some((chime) => chime.event.kind === 'land') ? 'land' : 'ring');
+          info(`chimed: ${describe(rung)}`);
         }
       } else {
         // A tab that cannot make sound leaves the chime for one that can.
-        tellOnce('blocked', 'a chime is due, but the browser has not let this page play sound yet: click anywhere on this page');
+        tellOnce('blocked', BLOCKED_NOTE);
       }
     }
     // Hold the lock while what this tab marked, silent or not, reaches the others.
@@ -177,7 +201,7 @@ export function createAlarm({
     const anySilent = due.some((chime) => !sound || isLate(chime.timer, now));
     // Only audible chimes, and this tab has found it cannot play: wait for a click.
     if (!anySilent && audio.isBlocked()) {
-      tellOnce('blocked', 'a chime is due, but the browser has not let this page play sound yet: click anywhere on this page');
+      tellOnce('blocked', BLOCKED_NOTE);
       return;
     }
     claiming = true;
@@ -256,7 +280,6 @@ export function createAlarm({
   const onGesture = safe('alarm.gesture', () => {
     // With the chime off there is no sound to start.
     if (!storage.getSetting('sound')) return;
-    if (audio.isBlocked()) told.delete('blocked');
     if (pending().length === 0) {
       // Nothing to play, but a tab found blocked earlier must not keep its
       // "click to allow" hint: the click is the permission, chime or not.

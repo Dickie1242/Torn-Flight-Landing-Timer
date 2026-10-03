@@ -1,11 +1,19 @@
-import test from 'node:test';
+import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   fakeClock, fakeLocks, memoryArea, laggyAreas, makeTimer, flush, captureConsole, T0, MIN,
 } from '../testlib/fakes.js';
 import { resetWarnOnce } from '../src/core/log.js';
-import { createStorage } from '../src/core/storage.js';
+import { createStorage, STORAGE_KEY } from '../src/core/storage.js';
 import { createAlarm, isLate, LATE_LIMIT_MS, LOCK_NAME, RETRY_MS } from '../src/core/alarm.js';
+
+// The alarm notes its decisions with console.info; keep them out of the test output.
+let quiet;
+beforeEach(() => { quiet = captureConsole('info'); });
+afterEach(() => { quiet.restore(); });
+
+/** The alarm's console notes so far in this test. */
+const notes = () => quiet.calls.map((args) => args.join(' '));
 
 function fakeWin() {
   const win = new EventTarget();
@@ -46,8 +54,8 @@ function seed(area, clock, ...timers) {
   for (const timer of timers) storage.addTimer(timer);
 }
 
-function tab({ area, clock, locks = null, allowed = true, holdMs = 0 }) {
-  const storage = createStorage({ area, target: null, clock });
+function tab({ area, clock, locks = null, allowed = true, holdMs = 0, target = null }) {
+  const storage = createStorage({ area, target, clock });
   const plays = [];
   const audio = fakeAudio(clock, plays, { allowed });
   const win = fakeWin();
@@ -410,18 +418,96 @@ test('two tabs, one warning and one landing chime between them', async () => {
   assert.deepEqual([...a.kinds, ...b.kinds].sort(), ['land', 'ring']);
 });
 
-test('a tab that may not play sound says so in the console, once', async () => {
-  resetWarnOnce();
+test('a tab that may not play sound says so in the console, once, even as clicks fail to help', async () => {
   const area = memoryArea();
   const clock = fakeClock(T0);
   seed(area, clock, makeTimer());
-  const info = captureConsole('info');
-  try {
-    tab({ area, clock, locks: fakeLocks(), allowed: false });
-    await run(clock, 25 * MIN + 10_000, 1000);
-  } finally {
-    info.restore();
+  const t = tab({ area, clock, locks: fakeLocks(), allowed: false });
+  await run(clock, 25 * MIN + 10_000, 1000);
+  for (let i = 0; i < 5; i += 1) {
+    t.win.dispatchEvent(new Event('keydown'));
+    await run(clock, 1000, 1000);
   }
-  const said = info.calls.map((args) => args.join(' ')).filter((line) => /click/i.test(line));
+  const said = notes().filter((line) => /click/i.test(line));
   assert.equal(said.length, 1, said.join(' | '));
+});
+
+test('a tab that drops the landing mark (one still on 1.0.0) cannot make the landing chime play again', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const target = new EventTarget();
+  seed(area, clock, makeTimer());
+  const t = tab({ area, clock, locks: fakeLocks(), target });
+  await run(clock, 27 * MIN + 1000, 1000);
+  assert.deepEqual(t.kinds, ['ring', 'land']);
+  // A 1.0.0 tab rewrites the store: it keeps rungAt but knows nothing of landRungAt.
+  const data = JSON.parse(area.getItem(STORAGE_KEY));
+  for (const timer of data.timers) delete timer.landRungAt;
+  area.setItem(STORAGE_KEY, JSON.stringify(data));
+  target.dispatchEvent(Object.assign(new Event('storage'), { key: STORAGE_KEY }));
+  await run(clock, 10_000, 1000);
+  assert.deepEqual(t.kinds, ['ring', 'land'], 'no second landing chime');
+});
+
+test('a timer saved by 1.0.0 and long landed is closed silently after the update', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  const old = makeTimer({ startedAt: T0 - 37 * MIN, ringAt: T0 - 12 * MIN, landingAt: T0 - 10 * MIN, rungAt: T0 - 12 * MIN });
+  delete old.landRungAt;
+  area.setItem(STORAGE_KEY, JSON.stringify({ version: 1, timers: [old], settings: {} }));
+  const t = tab({ area, clock, locks: fakeLocks() });
+  await flush();
+  assert.deepEqual(t.kinds, []);
+  assert.equal(t.storage.getTimer('1234567').landRungAt, T0);
+});
+
+test('a blocked tab clicked just after the landing plays one landing chime and closes both', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer());
+  const t = tab({ area, clock, locks: fakeLocks(), allowed: false });
+  await run(clock, 27 * MIN + 30_000, 1000);
+  assert.deepEqual(t.kinds, []);
+  t.audio.allowed = true;
+  t.win.dispatchEvent(new Event('pointerdown'));
+  await run(clock, 1000, 1000);
+  assert.deepEqual(t.kinds, ['land']);
+  const timer = t.storage.getTimer('1234567');
+  assert.notEqual(timer.rungAt, null);
+  assert.notEqual(timer.landRungAt, null);
+});
+
+test('one timer landing as another warns: one landing chime, and the note tells the two apart', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock,
+    makeTimer({ id: 'a' }),
+    makeTimer({ id: 'b', ringAt: T0 + 27 * MIN, landingAt: T0 + 29 * MIN }));
+  const t = tab({ area, clock, locks: fakeLocks() });
+  await run(clock, 27 * MIN, 1000);
+  assert.deepEqual(t.kinds, ['ring', 'land']);
+  const last = notes().filter((line) => /chimed/.test(line)).pop();
+  assert.match(last, /1 landing\b/);
+  assert.match(last, /1 landing soon/);
+});
+
+test('the notes name no players: they count chimes', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer({ name: 'SecretTarget' }));
+  tab({ area, clock, locks: fakeLocks() });
+  await run(clock, 27 * MIN, 1000);
+  assert.ok(notes().length >= 2);
+  assert.ok(notes().every((line) => !line.includes('SecretTarget')), notes().join(' | '));
+});
+
+test('with the chime off a whole flight leaves exactly two notes', async () => {
+  const area = memoryArea();
+  const clock = fakeClock(T0);
+  seed(area, clock, makeTimer());
+  const t = tab({ area, clock, locks: fakeLocks() });
+  t.storage.setSetting('sound', false);
+  await run(clock, 27 * MIN + 10_000, 1000);
+  assert.deepEqual(t.kinds, []);
+  assert.equal(notes().filter((line) => /no sound/.test(line)).length, 2, notes().join(' | '));
 });

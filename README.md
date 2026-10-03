@@ -31,6 +31,8 @@ The one thing that does go over the network is Tampermonkey's own update check. 
    Your userscript manager checks this link for updates, so new versions arrive automatically.
 3. Open a Torn profile.
 
+After an update, reload any Torn tabs you had open, so every tab runs the same version.
+
 To install by hand instead:
 1. Open the Tampermonkey dashboard and click the **+** tab.
 2. Delete everything in the editor.
@@ -146,8 +148,8 @@ src/styles.css                the whole stylesheet, injected once at boot
 src/core/flights.js           the flight table
 src/core/selectors.js         EVERY Torn page lookup lives here
 src/core/storage.js           timers and settings, shared across tabs
-src/core/alarm.js             rings each timer once, in one tab
-src/core/audio.js             the synthesised chime, and whether this tab may play it
+src/core/alarm.js             plays each timer's two chimes once, in one tab
+src/core/audio.js             the two synthesised chimes, and whether this tab may play them
 src/core/time.js, clock.js    formatting; the injectable clock
 src/core/dom.js, log.js       element builder; console helpers
 src/core/version.js, styles.js build version; stylesheet injection

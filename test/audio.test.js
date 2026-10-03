@@ -16,6 +16,7 @@ function fakeWin({ state = 'suspended', resume = 'start' } = {}) {
       this.destination = {};
       this.oscillators = 0;
       this.notes = [];
+      this.tails = 0;
       made.push(this);
     }
 
@@ -42,7 +43,8 @@ function fakeWin({ state = 'suspended', resume = 'start' } = {}) {
     }
 
     createGain() {
-      return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} };
+      const ctx = this;
+      return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {}, setTargetAtTime() { ctx.tails += 1; } }, connect() {} };
     }
   }
   const win = {
@@ -167,4 +169,14 @@ test('play() without a kind, or with an unknown one, plays the warning', async (
   audio.play('constructor');
   assert.equal(made[0].notes.length, 6);
   assert.ok(made[0].notes.every((o) => o.frequency.value === 880));
+});
+
+test('the landing chime fades like a bell; the warning stops short', async () => {
+  const { win, made } = fakeWin({ resume: 'start' });
+  const audio = createAudio({ win, timeoutMs: 5 });
+  await audio.ready();
+  audio.play('ring');
+  assert.equal(made[0].tails, 0);
+  audio.play('land');
+  assert.equal(made[0].tails, 4);
 });
