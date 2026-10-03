@@ -72,6 +72,16 @@ test('rule safety: the bundle makes no network requests and asks for no permissi
   for (const pattern of forbidden) {
     assert.ok(!pattern.test(code()), `the bundle must not contain ${pattern}`);
   }
+  // Torn's script etiquette: one click, one action, and nothing that acts in the
+  // game for the player. The script never opens the attack page, never clicks
+  // or fires events on Torn's page, and never navigates by itself.
+  const acting = [
+    /attack/i, /\.click\s*\(\s*\)/, /dispatchEvent/,
+    /location\.(?:href\s*=|assign|replace)/, /\blocation\s*=/,
+  ];
+  for (const pattern of acting) {
+    assert.ok(!pattern.test(code()), `the bundle must not contain ${pattern}`);
+  }
   const grants = [...bundle().matchAll(/^\/\/ @grant\s+(\S+)/gm)].map((m) => m[1]);
   assert.deepEqual(grants, ['none'], 'the only grant is none');
   assert.ok(!/^\/\/ @(connect|require|resource)\b/m.test(bundle()), 'no @connect, @require or @resource');

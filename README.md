@@ -14,8 +14,14 @@ A userscript for [Torn City](https://www.torn.com) that puts a landing timer on 
 **Landing Timer makes no network requests.** It sends nothing to Torn, to its API or to any other server, and it needs no API key. A test in the build fails if any of the known ways to make a request (the network APIs, or an element or style that loads a URL) appears in the finished script, and the script asks for no special permissions (`@grant none`).
 
 What it reads:
-- It reads **only the profile page you have open**, to fill in the panel.
+- It reads **only the profile page you have open**, to fill in the panel. It never loads or reads any other page in the background; that would be scraping.
 - After you press **Start** it is a clock. The countdown and the chime use only the numbers you set, and read nothing from any page.
+
+What it never does:
+- **It never acts in the game for you.** It never opens or links to the attack page, never clicks anything on Torn's page, and never navigates by itself. The chime is only a sound.
+- **One click, one action.** The button opens the panel, **Start** saves a timer, ✕ removes one, and a name in the box opens that player's profile. Nothing else happens on a click.
+
+The build test checks this too: it fails if the finished script mentions the attack page, clicks or fires events on the page, or changes the page address itself.
 
 Torn's rules allow scripts that rely on "a page that you have manually loaded and are actively viewing". The chime can play while Torn is in a background tab. It reads nothing when it does, but if you'd rather not have that, the 🔊 button in the timer box turns it off.
 
