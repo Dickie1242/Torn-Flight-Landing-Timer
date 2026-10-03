@@ -257,7 +257,7 @@ It is on every Torn page and hidden while there are no timers.
   - With the chime off, no sound is started at all.
 - **Late:** if more than 2 minutes have passed since the estimated landing
   (computer asleep, browser closed), each chime still unplayed is marked
-  without a sound. A big buffer therefore still chimes late, up to the landing.
+  without a sound. A big buffer therefore still chimes late, up to 2 minutes after the landing.
   The row still shows red.
 - **Sound off:** each chime is marked silently. The setting is read afresh
   inside the lock, so a mute in another tab counts at once.

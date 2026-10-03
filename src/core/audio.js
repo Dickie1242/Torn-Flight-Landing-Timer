@@ -22,7 +22,7 @@ export const READY_TIMEOUT_MS = 300;
 export const CHIMES = Object.freeze({
   ring: Object.freeze({ wave: 'sine', notes: Object.freeze([880, 880, 880]), step: 0.45, length: 0.35, peak: 0.3 }),
   land: Object.freeze({
-    wave: 'triangle', notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]), step: 0.28, length: 1.2, peak: 0.35, tail: 0.25,
+    wave: 'triangle', notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]), step: 0.28, length: 1.5, peak: 0.35, tail: 0.25,
   }),
 });
 

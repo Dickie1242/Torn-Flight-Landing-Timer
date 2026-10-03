@@ -564,7 +564,7 @@
       wave: "triangle",
       notes: Object.freeze([523.25, 659.25, 783.99, 1046.5]),
       step: 0.28,
-      length: 1.2,
+      length: 1.5,
       peak: 0.35,
       tail: 0.25
     })
